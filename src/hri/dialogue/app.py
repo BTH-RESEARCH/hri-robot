@@ -291,7 +291,7 @@ class RobotApp:
         self.say_q.put(END_OF_TURN)
 
     def _face_seen(self) -> bool:
-        return self.fer_stream.smoother.ema is not None
+        return self.fer_stream.face_seen
 
     def _handle(self, utt: Utterance) -> None:
         t_start = time.time()

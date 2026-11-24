@@ -157,7 +157,8 @@ def cmd_check(cfg: Config, args) -> int:
                 if not stream.calibrating:
                     agg.add(af.to_msg(fer.labels))
                 raw = fer.labels[int(af.raw.argmax())]
-                print(f"raw {raw:9s} -> {af.label:9s} {af.confidence:.2f}  V{af.valence:+.2f} A{af.arousal:+.2f} "
+                print(f"raw {raw:9s} -> calib {af.top:9s} -> stable {af.label:9s} {af.confidence:.2f}  "
+                      f"V{af.valence:+.2f} A{af.arousal:+.2f} "
                       f"q{af.quality:.2f} {'calib ' if stream.calibrating else ''}{ms:5.0f} ms")
                 now = time.time()
                 if not stream.calibrating and now - last_decision >= float(mcfg.get("update_sec", 1.0)):

@@ -40,17 +40,48 @@ vision:
     # Preprocessing (classes, img_size, grayscale, train_res, mean/std) is read from the pack's fer.json,
     # so it always matches training. FERPlus: gray -> 48x48 (BOX) -> RGB -> 224 (BILINEAR) -> ImageNet norm.
     num_threads: 2
-  # Temporal post-processing inherited from fer_resnet_demo (v2 pipeline)
-  smoothing:
-    alpha: 0.3             # EMA weight of the new frame
-    reset_after: 10        # frames without a face before the EMA history is cleared
-  baseline:                # personal resting-face calibration (fer_demo/calibration.py)
+  # ---- Post-processing inherited from fer_resnet_demo v2 (= ablation V3b, runners.py webcam chain):
+  #      softmax -> sensitivity -> personal baseline -> hysteresis + 2 biomechanical rules
+  #      Each stage can be switched off for ablation (enabled: false).
+  sensitivity:             # 1. cost-sensitive scaling  P'_c = w_c P_c / sum(w_j P_j)   (fer_demo/loss.py)
+    enabled: true
+    weights: {neutral: 0.45, happiness: 0.95, surprise: 1.15, sadness: 1.85, anger: 1.90,
+              fear: 3.00, contempt: 3.40, disgust: 3.60}
+  baseline:                # 2. personal resting-face baseline + Dynamic Gain Control (fer_demo/calibration.py)
     enabled: true
     calib_seconds: 3.0     # user looks at the robot with a resting face
     min_samples: 5
-    neutral_margin: 0.15
-    gain: 1.5              # boost of classes above the baseline
+    max_non_neutral: 0.15  # sanity clamp: non-neutral share of P_base capped, surplus -> neutral
+    neutral_margin: 0.20
+    dynamic_neutral_suppress: true   # extra neutral penalty = 2.2 x largest positive non-neutral delta
+    delta_gain: 2.0        # gain for classes missing from class_gains
+    class_gains: {neutral: 1.0, happiness: 1.6, surprise: 2.0, sadness: 3.2, anger: 3.2,
+                  fear: 3.4, contempt: 3.4, disgust: 3.6}
     adaptive_momentum: 0.0 # >0: slowly update P_base while the user is neutral
+  hysteresis:              # 3. stable label: dual thresholds + biomechanical rules (fer_demo/temporal.py)
+    enabled: true
+    t_min: 0.25            # a candidate must hold this long before the label switches
+    min_dwell_s: 0.25      # rule 1: refractory time of an expression (unless candidate >= 0.85)
+    neutral_bridge_s: 0.25 # rule 1: negative <-> positive must pass through neutral this long
+    fade_grace_s: 0.20     # do not drop to neutral on a 1-2 frame blink
+    transition_dynamics: true        # rules 1 + 2 (false = ablation V3a)
+    barrier_opposing: 0.35 # rule 2 fallback barriers (the transition matrix is built in)
+    barrier_distant: 0.15
+    theta_start: 0.55      # defaults for classes missing from class_thresholds
+    theta_end: 0.35
+    class_thresholds:
+      neutral: {start: 0.55, end: 0.38}
+      happiness: {start: 0.38, end: 0.22}
+      surprise: {start: 0.32, end: 0.18}
+      sadness: {start: 0.24, end: 0.12}
+      anger: {start: 0.24, end: 0.12}
+      fear: {start: 0.18, end: 0.08}
+      contempt: {start: 0.18, end: 0.08}
+      disgust: {start: 0.18, end: 0.08}
+  smoothing:               # EMA is no longer in the demo's chain (comparator only) -> off by default
+    enabled: false
+    alpha: 0.45
+    reset_after: 10        # frames without a face before the per-user state is reset
 
 affect:
   buffer_sec: 60

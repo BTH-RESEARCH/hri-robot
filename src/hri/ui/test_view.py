@@ -86,7 +86,8 @@ def run_test(cfg, seconds: float = 0.0, no_calib: bool = False, csv_path: str | 
         Path(csv_path).parent.mkdir(parents=True, exist_ok=True)
         csv_file = open(csv_path, "w", newline="", encoding="utf-8")
         writer = csv.writer(csv_file)
-        writer.writerow(["t", "face", "raw_label", "label", "conf", "valence", "arousal", "calibrated",
+        writer.writerow(["t", "face", "raw_label", "calib_top", "stable_label", "rest_buffer", "conf",
+                         "valence", "arousal", "calibrated",
                          *[f"raw_{c}" for c in labels], *[f"p_{c}" for c in labels], "strategy", "infer_ms"])
 
     if not no_calib:
@@ -148,7 +149,8 @@ def run_test(cfg, seconds: float = 0.0, no_calib: bool = False, csv_path: str | 
                 summary = agg.summarize(now - 5.0, now)
             if writer is not None:
                 writer.writerow([round(now, 3), af is not None,
-                                 labels[int(af.raw.argmax())] if af else "", af.label if af else "",
+                                 labels[int(af.raw.argmax())] if af else "", af.top if af else "",
+                                 af.label if af else "", af.buffer if af else "",
                                  round(af.confidence, 4) if af else "", round(af.valence, 4) if af else "",
                                  round(af.arousal, 4) if af else "", af.calibrated if af else "",
                                  *([round(float(x), 4) for x in af.raw] if af else [""] * len(labels)),
@@ -204,7 +206,8 @@ def run_test(cfg, seconds: float = 0.0, no_calib: bool = False, csv_path: str | 
             yy += 28
             if af is not None:
                 raw_lbl = labels[int(af.raw.argmax())]
-                screen.blit(f_mid.render(f"raw {raw_lbl}  ->  {af.label} {af.confidence:.2f}", True, TEXT),
+                stable = f"{af.label} {af.confidence:.2f}" + (" (rest)" if af.buffer else "")
+                screen.blit(f_mid.render(f"raw {raw_lbl} > calib {af.top} > {stable}", True, TEXT),
                             (px + 10, yy))
             yy += 28
             bar_w = pw - 130

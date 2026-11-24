@@ -25,6 +25,16 @@ class Frame:
     arousal: float
     confidence: float
     quality: float
+    label: str | None = None    # stable label from the hysteresis segmenter
+
+
+def weighted_label_vote(frames: list, weights: np.ndarray | None = None) -> str | None:
+    """Most common stable (hysteresis) label in a window, weighted; None if frames carry no labels."""
+    votes: dict[str, float] = {}
+    for i, f in enumerate(frames):
+        if getattr(f, "label", None):
+            votes[f.label] = votes.get(f.label, 0.0) + (1.0 if weights is None else float(weights[i]))
+    return max(votes, key=votes.get) if votes else None
 
 
 class AffectAggregator:
@@ -40,7 +50,7 @@ class AffectAggregator:
     # ---------- input ----------
     def add(self, msg: dict) -> None:
         f = Frame(msg["t"], np.asarray(msg["probs"], float), msg["valence"], msg["arousal"],
-                  msg["confidence"], msg["quality"])
+                  msg["confidence"], msg["quality"], msg.get("label"))
         with self._lock:
             self.frames.append(f)
             self.last_face_t = f.t
@@ -92,7 +102,8 @@ class AffectAggregator:
         top = np.argsort(dist)[::-1][:3]
         out = {
             "face_visible": True,
-            "dominant": self.labels[int(top[0])],
+            # stable hysteresis label (weighted vote); falls back to the probability argmax
+            "dominant": weighted_label_vote(sel, w) or self.labels[int(top[0])],
             "dist": {self.labels[i]: round(float(dist[i]), 2) for i in top},
             "valence": round(val, 2),
             "arousal": round(aro, 2),

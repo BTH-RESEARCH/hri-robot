@@ -10,7 +10,7 @@ Robot tương tác người–máy (HRI) có nhận biết cảm xúc, chạy tr
                                                                                                  ─► TTS tiếng Việt + khuôn mặt robot
 ```
 
-- **FER:** ResNet-18 huấn luyện trên FERPlus (8 lớp), chạy bằng ONNX Runtime. Kế thừa pipeline `fer_resnet_demo` (EMA + baseline cá nhân); detector là YuNet.
+- **FER:** ResNet-18 huấn luyện trên FERPlus (8 lớp), chạy bằng ONNX Runtime. Hậu kỳ kế thừa `fer_resnet_demo` v2 (V3b: sensitivity → baseline cá nhân → hysteresis + 2 luật sinh lý); detector là YuNet.
 - **STT / TTS / nhận diện người nói:** sherpa-onnx 2.0.3 (Zipformer tiếng Việt, Piper `vi_VN-vais1000`, 3D-Speaker).
 - **LLM:** API tương thích OpenAI; mặc định Gemini `gemini-3.5-flash-lite`, có provider dự phòng.
 - **Khuôn mặt robot:** vẽ bằng tham số với pygame; LLM chọn biểu cảm qua thẻ `[EMO:nhãn|cường độ]`.
@@ -192,8 +192,8 @@ hri test --no-calib            # bỏ qua bước đo baseline 3 s
 Màn hình hiển thị:
 - **Bên trái:** camera (đã lật gương) với khung mặt từ YuNet, 5 điểm mốc, nhãn và độ tin cậy.
 - **Bên phải:**
-  - Nhãn thô → nhãn đã hiệu chuẩn.
-  - 8 thanh xác suất: thanh màu là sau EMA + baseline, vạch trắng là đầu ra thô của model.
+  - `raw X > calib Y > Z`: nhãn thô của model → argmax sau sensitivity + baseline → nhãn ổn định sau hysteresis (`(rest)` = đang ở vùng nghỉ neutral giữa hai biểu cảm).
+  - 8 thanh xác suất: thanh màu là sau sensitivity + baseline, vạch trắng là đầu ra thô của model.
   - Biểu đồ valence–arousal, ES 5 s, xu hướng.
   - Chiến lược micro-loop.
   - Khuôn mặt robot phản ứng trực tiếp.
@@ -254,8 +254,10 @@ Các nhóm tham số chính:
 | `camera.*` | `backend` (`opencv` / `picamera2` / `file`), `index`, `width`, `height`, `flip_horizontal`, `source` (cho `file`) |
 | `vision.face_detector.*` | ngưỡng YuNet, `min_face_size`, `margin` |
 | `vision.fer.*` | `model` (khóa trong manifest), `num_threads` |
-| `vision.smoothing.*` | EMA `alpha`, `reset_after` |
-| `vision.baseline.*` | `calib_seconds`, `neutral_margin`, `gain`, `adaptive_momentum` |
+| `vision.sensitivity.*` | bật/tắt, trọng số độ nhạy theo lớp |
+| `vision.baseline.*` | `calib_seconds`, `max_non_neutral`, `neutral_margin`, `dynamic_neutral_suppress`, `class_gains` |
+| `vision.hysteresis.*` | `t_min`, `min_dwell_s`, `neutral_bridge_s`, `fade_grace_s`, `transition_dynamics`, ngưỡng theo lớp |
+| `vision.smoothing.*` | EMA (mặc định tắt, như demo), `reset_after` |
 | `cold_start.*` | số frame, ngưỡng V để chọn lời chào |
 | `micro_loop.*` | `update_sec`, `window_sec`, ngưỡng V/A cho từng chiến lược, cường độ biểu cảm |
 | `affect.*` | cửa sổ của lượt nói, trọng số frame lúc đang nói, `stability.*` (M_max, P_max, ngưỡng bước nhảy, lấy mẫu lại) |
@@ -274,19 +276,34 @@ hri test --set camera.backend=file --set camera.source=samples/video.mp4
 
 ## 10. Cách hệ thống hoạt động
 
-### Micro-loop (phản xạ không lời)
+### Hậu kỳ FER (kế thừa `fer_resnet_demo` v2, biến thể V3b)
 ```
 camera → YuNet → crop vuông (margin 0.15) → ResNet-18 → softmax
-       → EMA (α 0.3) → baseline cá nhân → V/A (bảng circumplex Russell)
-       → mỗi 1 s, V/A trung bình của 1 s gần nhất:
-           A ≥ 0.5 và V < 0.2 → De-escalation (calm)
-           V ≥ 0.2            → Mirroring    (happy / surprised)
-           V ≤ −0.2           → Support      (empathy / concerned)
-           còn lại            → Attentive    (listening)
+  1. Sensitivity scaling   P'_c = w_c·P_c / Σ w_j·P_j        (neutral ×0.45 … disgust ×3.6)
+  2. Baseline cá nhân      P_base đo 3 s mặt tĩnh, kẹp lớp phi-neutral ≤ 0.15 (phần dư dồn về neutral);
+                           lớp vượt baseline: p + gain_c·Δ (happiness 1.6 … disgust 3.6), còn lại p·0.5;
+                           neutral: p − 0.20 − 2.2·max(Δ phi-neutral) khi có cảm xúc chớm xuất hiện
+  3. Hysteresis + 2 luật sinh lý → NHÃN ỔN ĐỊNH
+       ngưỡng bắt đầu/duy trì theo lớp (neutral 0.55/0.38 … fear 0.18/0.08), giữ t_min 0.25 s,
+       luật 1: thời gian lưu 0.25 s; muốn đổi tiêu cực ↔ tích cực phải qua neutral ≥ 0.25 s,
+       luật 2: ma trận rào cản chuyển tiếp (vd sadness → happiness +0.35), ân hạn suy tàn 0.2 s
 ```
+- Code nằm ở `src/hri/vision/postproc.py`, port từ `fer_demo/loss.py`, `calibration.py`, `temporal.py` theo **đúng chuỗi của `runners.py` + `configs/default.yaml`** (sensitivity *trước* baseline, `class_gains` lấy từ config). Ở những chỗ README / `EmotionPostProcessor` của demo nói khác, code `runners.py` được ưu tiên.
+- Đã kiểm tra trùng khớp với code demo: 13.500 frame ngẫu nhiên, lệch xác suất ≤ 1e-7, **0 frame lệch nhãn**.
+- EMA không còn nằm trong chuỗi, giống demo (`vision.smoothing.enabled: false`). Mỗi khâu đều tắt được (`enabled: false`, `transition_dynamics: false` = V3a) để làm ablation.
+- Không kế thừa: pedagogy. Detector: YuNet thay cho YOLO.
+
+### Micro-loop (phản xạ không lời)
+```
+xác suất sau baseline → V/A (bảng circumplex Russell)
+  → mỗi 1 s, V/A trung bình (theo chất lượng) của 1 s gần nhất:
+      A ≥ 0.5 và V < 0.2 → De-escalation (calm)
+      V ≥ 0.2            → Mirroring    (happy / surprised theo nhãn ổn định của người dùng)
+      V ≤ −0.2           → Support      (empathy / concerned theo nhãn ổn định)
+      còn lại            → Attentive    (listening)
+```
+- V/A lấy từ **xác suất sau baseline** (liên tục, giữ được cường độ cho ES/MSSD). **Nhãn ổn định** từ hysteresis dùng để chọn biểu cảm robot và làm trường `dominant` gửi cho LLM.
 - Micro-loop chạy khi robot đang chờ, đang nghe và lúc chờ LLM. Khi robot nói, thẻ `[EMO]` của LLM điều khiển khuôn mặt.
-- **Baseline** port từ `fer_resnet_demo`: neutral trừ 0.15; lớp vượt baseline được cộng 1.5 lần độ lệch; lớp còn lại nhân 0.5; sau đó chuẩn hóa lại.
-- **Không kế thừa** từ demo: sensitivity scaling, hysteresis, pedagogy.
 
 ### Affect summary cho mỗi lượt nói
 Lấy các frame trong khoảng [bắt đầu nói − 1 s, kết thúc nói], tính trọng số theo chất lượng khuôn mặt và giảm trọng số frame lúc người dùng đang nói. Kết quả gồm:

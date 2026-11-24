@@ -16,6 +16,8 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
+from hri.affect.aggregator import weighted_label_vote
+
 MIRRORING, SUPPORT, DEESCALATION, ATTENTIVE = "mirroring", "support", "de-escalation", "attentive"
 
 # user's dominant FERPlus class -> robot expression, per strategy
@@ -55,7 +57,8 @@ def decide(frames: list, labels: list[str], cfg: dict) -> MicroDecision | None:
     v = float(w @ np.array([f.valence for f in frames]))
     a = float(w @ np.array([f.arousal for f in frames]))
     dist = (w[:, None] * np.stack([f.probs for f in frames])).sum(0)
-    dominant = labels[int(np.argmax(dist))]
+    # the user's stable (hysteresis) label picks WHICH face to mirror / support; V/A pick the strategy
+    dominant = weighted_label_vote(frames, w) or labels[int(np.argmax(dist))]
 
     pos, neg = float(cfg.get("positive_valence", 0.2)), float(cfg.get("negative_valence", -0.2))
     high_a = float(cfg.get("high_arousal", 0.5))
