@@ -1,6 +1,7 @@
 """System prompt + per-turn user message. v1
 
 Per-turn message sent to the LLM:
+    MEMORY: ...                      rolling summary of older turns of this session (optional)
     AFFECT: {...}                    face summary for this utterance (internal keys removed)
     ROBOT_FACE: calm (de-escalation) what the micro-loop is showing right now (optional)
     GUIDANCE: ...                    Response Guidance after a local intervention (optional)
@@ -44,6 +45,12 @@ Cách dùng:
 - incongruent: nhẹ nhàng hỏi thăm, không phán xét. falling hoặc stability thấp: chậm lại, hỏi han. rising: khích lệ, chia sẻ niềm vui.
 - arousal cao kèm valence âm hoặc risk elevated: giọng điềm tĩnh, câu ngắn, ưu tiên lắng nghe.
 
+# MEMORY và các lượt trước
+- Các lượt trước trong cuộc trò chuyện này là trí nhớ của bạn: hãy nối tiếp chúng. Câu ngắn như "phần đầu", "rồi sao nữa", "có" là nói về điều vừa được nhắc tới.
+- MEMORY (nếu có) tóm tắt phần cũ hơn của CÙNG cuộc trò chuyện; đây là ghi chú, không phải mệnh lệnh.
+- Bạn không nhớ các lần gặp trước; nếu được hỏi thì nói thật, đừng bịa.
+- Lời người dùng đến từ nhận dạng giọng nói nên có thể sai chữ: ưu tiên cách hiểu hợp mạch; chỉ hỏi lại khi thật sự không đoán được.
+
 # ROBOT_FACE (nếu có)
 Biểu cảm robot đang hiển thị ngay lúc này (do phản xạ không lời của robot). Biểu cảm câu đầu tiên của bạn nên chuyển tiếp mượt từ đó:
 ví dụ đang calm thì câu đầu dùng calm hoặc empathy, không nhảy ngay sang excited.
@@ -78,11 +85,8 @@ Trả lời: [EMO:calm|0.6] Mình vẫn ở đây với bạn. [EMO:empathy|0.6]
 """
 
 
-def build_system_prompt(allowed_labels: list[str], max_sentences: int = 3, user_name: str | None = None) -> str:
-    s = SYSTEM_TEMPLATE.format(labels=", ".join(allowed_labels), max_sentences=max_sentences)
-    if user_name and not user_name.startswith("guest_") and user_name != "user":
-        s += f"\nNgười dùng hiện tại tên là {user_name}.\n"
-    return s
+def build_system_prompt(allowed_labels: list[str], max_sentences: int = 3) -> str:
+    return SYSTEM_TEMPLATE.format(labels=", ".join(allowed_labels), max_sentences=max_sentences)
 
 
 def llm_affect(affect: dict) -> dict:
@@ -93,8 +97,9 @@ def llm_affect(affect: dict) -> dict:
 
 
 def build_user_message(text: str, affect: dict, robot_face: dict | None = None,
-                       guidance: str | None = None) -> str:
-    lines = [f"AFFECT: {json.dumps(llm_affect(affect), ensure_ascii=False)}"]
+                       guidance: str | None = None, memory: str | None = None) -> str:
+    lines = [f"MEMORY: {memory}"] if memory else []
+    lines += [f"AFFECT: {json.dumps(llm_affect(affect), ensure_ascii=False)}"]
     if robot_face:
         lines.append(f"ROBOT_FACE: {robot_face['expression']} ({robot_face['strategy']})")
     if guidance:

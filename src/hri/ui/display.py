@@ -34,6 +34,15 @@ def configure_sdl(ui_cfg: dict) -> str | None:
     return drv
 
 
+def init_pygame() -> None:
+    """Display and fonts only. pygame.init() would also start pygame.mixer, which grabs the sound card: on the
+    Pi the HDMI speakers accept one client, so TTS then fails with 'Device unavailable [-9985]'."""
+    import pygame as pg
+
+    pg.display.init()
+    pg.font.init()
+
+
 def fullscreen_only() -> bool:
     return os.environ.get("SDL_VIDEODRIVER", "") in FULLSCREEN_ONLY_DRIVERS
 
@@ -42,7 +51,7 @@ def open_display(size: tuple[int, int], fullscreen: bool, caption: str):
     """pygame.display.set_mode with Pi-friendly defaults and an actionable error message."""
     import pygame as pg
 
-    pg.init()
+    init_pygame()
     if fullscreen or fullscreen_only():
         size, flags = (0, 0), pg.FULLSCREEN            # native resolution of the LCD
     else:

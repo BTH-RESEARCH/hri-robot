@@ -5,13 +5,14 @@ Robot tương tác người–máy (HRI) có nhận biết cảm xúc, chạy tr
 ```
  Camera ─► YuNet ─► ResNet-18 FER ─► EMA + baseline cá nhân ─► V/A ─┬─► Micro-loop (mỗi 1 s): khuôn mặt robot phản xạ
                                                                     │     Mirroring / Support / De-escalation / Attentive
- Mic ─► VAD ─► ASR tiếng Việt ─► Speaker ID ─► Affect summary ──────┴─► Intervention logic ─┬─► Hỗ trợ khẩn tại chỗ (không qua LLM)
+ Mic ─► VAD ─► ASR tiếng Việt ─► Affect summary ────────────────────┴─► Intervention logic ─┬─► Hỗ trợ khẩn tại chỗ (không qua LLM)
                                                 (ES, trend, lệch lời–mặt)                  └─► LLM (Gemini) ─► [EMO:x|i] câu…
                                                                                                  ─► TTS tiếng Việt + khuôn mặt robot
 ```
 
 - **FER:** ResNet-18 huấn luyện trên FERPlus (8 lớp), chạy bằng ONNX Runtime. Hậu kỳ kế thừa `fer_resnet_demo` v2 (V3b: sensitivity → baseline cá nhân → hysteresis + 2 luật sinh lý); detector là YuNet.
-- **STT / TTS / nhận diện người nói:** sherpa-onnx 2.0.3 (Zipformer tiếng Việt, Piper `vi_VN-vais1000`, 3D-Speaker).
+- **STT / TTS:** sherpa-onnx 2.0.3 (Zipformer tiếng Việt, Piper `vi_VN-vais1000`). Không nhận diện hay lưu giọng nói của người dùng.
+- **Trí nhớ:** theo phiên gặp mặt, chỉ nằm trong RAM, xóa khi người dùng rời đi.
 - **LLM:** API tương thích OpenAI; mặc định Gemini `gemini-3.5-flash-lite`, có provider dự phòng.
 - **Khuôn mặt robot:** vẽ bằng tham số với pygame; LLM chọn biểu cảm qua thẻ `[EMO:nhãn|cường độ]`.
 - **Kiến trúc hai vòng lặp:** theo bài Fluid-Xpress (HRI '26). Micro-loop phản xạ không lời, macro-loop trả lời bằng lời.
@@ -43,7 +44,7 @@ Robot tương tác người–máy (HRI) có nhận biết cảm xúc, chạy tr
 | Python | 3.10 – 3.12 | 3.11 (có sẵn trong OS) |
 | Camera | Webcam USB / tích hợp | Pi Camera qua cổng CSI |
 | Màn hình | Cửa sổ trên desktop | LCD HDMI (Pi OS Lite: vẽ trực tiếp qua `kmsdrm`) |
-| Âm thanh | Mic + loa của máy | Mic USB + loa (USB / jack / HDMI) |
+| Âm thanh | Mic + loa của máy | Mic USB + loa của màn hình HDMI |
 | Mạng | Cần cho LLM và lần tải model đầu | như laptop |
 
 Dung lượng model tải về khoảng 250 MB, lưu trong `~/.cache/hri-robot/models`.
@@ -81,7 +82,7 @@ Script setup sẽ tạo `.venv`, cài package (`pip install -e ".[dev]"`), tạo
 ### 3.1 Phần cứng
 - Pi Camera cắm vào cổng CSI.
 - LCD HDMI cắm vào **HDMI0** (cổng gần chân nguồn USB-C). Cắm màn hình **trước khi bật** Pi.
-- Mic USB và loa.
+- Mic USB. Loa: dùng luôn loa của màn hình HDMI (không cần loa rời); vì vậy phải cắm màn hình vào **HDMI0**.
 - Nên gắn tản nhiệt chủ động (Active Cooler), vì FER, ASR và TTS cùng chạy trên 4 nhân.
 
 ### 3.2 Cài đặt
@@ -153,7 +154,6 @@ hri models download fer --force   # tải lại một model
 | `yunet` | OpenCV Zoo | phát hiện khuôn mặt |
 | `silero_vad`, `asr_vi` | sherpa-onnx releases | VAD + Zipformer tiếng Việt |
 | `tts_vi` | sherpa-onnx releases | Piper `vi_VN-vais1000-medium` (1 giọng) |
-| `speaker_embedding` | sherpa-onnx releases | 3D-Speaker (nhận diện người nói) |
 
 - **`.ferpack`** là file zip gồm `model.onnx`, `fer.json` (thông số tiền xử lý) và 500 ảnh test kèm logits tham chiếu. Tiền xử lý được đọc từ `fer.json`, không viết cứng trong code: ảnh xám → 48×48 (BOX) → RGB → 224 (BILINEAR) → chuẩn hóa ImageNet, giống hệt lúc huấn luyện.
 - Laptop và Pi5 dùng **cùng bản fp32**. Muốn thử int8: `hri models download fer_int8` rồi `hri run --set vision.fer.model=fer_int8`.
@@ -174,6 +174,7 @@ Nên chạy lần lượt khi cài trên máy mới:
 | `hri check fer` | ONNX + tiền xử lý trên máy này khớp PyTorch | `agree=100.0%`, `acc≈83.4%` |
 | `hri check camera` | camera | in số FPS |
 | `hri check vision --seconds 20` | camera → FER → baseline → micro-loop (in chữ) | nhãn và V/A thay đổi theo mặt bạn |
+| `hri check speaker` | loa, trong lúc cửa sổ robot đang mở | nghe tiếng bíp 1.5 s |
 | `hri check mic` | liệt kê thiết bị âm thanh, thu 5 s rồi phát lại | nghe được tiếng mình |
 | `hri check asr --seconds 15` | nhận dạng tiếng Việt | in câu bạn nói |
 | `hri check tts --text "Xin chào"` | giọng nói | in RTF < 1 và phát âm thanh |
@@ -213,7 +214,7 @@ Trình tự:
 3. Lấy 12 frame để chọn lời chào: tích cực, trung tính hoặc hỗ trợ.
 4. Hội thoại: bạn nói → robot hiện mặt "thinking" và micro-loop tiếp tục phản xạ → robot trả lời (giọng nói + biểu cảm theo từng câu).
 
-Phím `c` trên cửa sổ robot đo lại baseline; `q`/`Esc` thoát.
+Phím trên cửa sổ robot: `c` đo lại baseline · `n` sang người mới (xóa trí nhớ, chào lại) · `q`/`Esc` thoát.
 
 ### `hri chat` — gõ phím thay cho mic (dùng để thử LLM / prompt)
 ```bash
@@ -261,8 +262,9 @@ Các nhóm tham số chính:
 | `cold_start.*` | số frame, ngưỡng V để chọn lời chào |
 | `micro_loop.*` | `update_sec`, `window_sec`, ngưỡng V/A cho từng chiến lược, cường độ biểu cảm |
 | `affect.*` | cửa sổ của lượt nói, trọng số frame lúc đang nói, `stability.*` (M_max, P_max, ngưỡng bước nhảy, lấy mẫu lại) |
-| `audio.*` | thiết bị vào/ra, VAD, ASR, TTS (`speed`, `speaker_id`), speaker ID, `barge_in` |
-| `llm.*` | danh sách provider, `temperature`, `max_tokens`, `history_turns` |
+| `audio.*` | thiết bị vào/ra, VAD, ASR, TTS (`speed`, `speaker_id` = giọng đọc của robot), `barge_in` |
+| `llm.*` | danh sách provider, `temperature`, `max_tokens` |
+| `memory.*` | thời gian chờ kết thúc phiên, số lượt giữ nguyên văn, nhịp và độ dài tóm tắt |
 | `expression.allowed` | các nhãn `[EMO]` LLM được dùng |
 | `safety.*` | từ khóa nguy cơ, câu hỗ trợ khẩn |
 | `ui.*`, `test_ui.*` | kích thước, toàn màn hình, màu, `sdl_videodriver` |
@@ -315,8 +317,16 @@ Lấy các frame trong khoảng [bắt đầu nói − 1 s, kết thúc nói], t
 - **`risk = high`** (từ khóa nguy cơ): robot hỗ trợ ngay tại chỗ, không gọi LLM. Lượt sau LLM nhận dòng `GUIDANCE` để nói tiếp mạch đó (Response Guidance).
 - **`risk = elevated`** (valence rất âm và ổn định): được đưa vào prompt để LLM ưu tiên lắng nghe.
 
+### Trí nhớ theo phiên
+- **Bắt đầu** khi có người trước camera (hoặc có người nói). **Kết thúc** khi không thấy mặt *và* không ai nói trong `memory.idle_sec` (45 s), khi người dùng tạm biệt, hoặc bấm `n`. Không dùng camera thì chỉ tính im lặng (180 s).
+- Giữ nguyên văn 6–9 lượt gần nhất (gồm cả lời chào). Đủ 10 lượt, 4 lượt cũ nhất được LLM gộp vào bản tóm tắt khoảng 80 từ, chạy nền sau khi robot nói xong.
+- Chỉ nằm trong RAM; hết phiên thì xóa. Log nghiên cứu JSONL vẫn ghi từng lượt (không ghi bản tóm tắt).
+- Câu trả lời bị ngắt giữa chừng: câu dở không được đọc và không vào trí nhớ; nếu chưa đọc được câu nào thì tự thử lại một lần.
+- Giới hạn: hai người đổi chỗ trong chưa đầy 45 s dùng chung một phiên (bấm `n` để tách).
+
 ### Tin nhắn gửi LLM mỗi lượt
 ```
+MEMORY: ...                            ← tóm tắt phần cũ của phiên, nếu có
 AFFECT: {"face_visible": true, "dominant": "sadness", "valence": -0.45, "arousal": -0.2, "trend": "falling",
          "stability": 0.8, "confidence": 0.7, "text_vs_face": "incongruent", "risk": "low"}
 ROBOT_FACE: empathy (support)          ← biểu cảm micro-loop đang hiện
@@ -339,7 +349,6 @@ LLM trả về các câu có thẻ:
 |---|---|
 | `~/.local/share/hri-robot/logs/session_*.jsonl` | mỗi lượt: lời người dùng, affect (kèm MSSD/PAC), quyết định micro-loop, ROBOT_FACE/GUIDANCE đã gửi, câu trả lời, độ trễ |
 | `hri test --csv file.csv` | mỗi frame: xác suất thô và đã hiệu chuẩn của 8 lớp, V/A, chiến lược, thời gian xử lý |
-| `~/.local/share/hri-robot/speakers.npz` | embedding giọng nói của người đã gặp (`guest_N`) |
 | `~/.local/share/hri-robot/snapshots/` | ảnh chụp bằng phím `s` trong `hri test` |
 
 ---
@@ -352,7 +361,9 @@ LLM trả về các câu có thẻ:
 | `hri check display` báo lỗi quyền | `sudo usermod -aG video,render,input $USER` rồi đăng nhập lại |
 | LCD đen hoặc sai độ phân giải | Thêm `video=HDMI-A-1:WxH@60` vào `cmdline.txt` (mục 3.4) |
 | Vẫn không vẽ được lên LCD | Dự phòng: `sudo apt install cage` rồi `cage -- .venv/bin/hri run` |
-| Âm thanh phát ra loa HDMI thay vì loa của bạn | Xem danh sách bằng `hri check mic`, rồi đặt `audio.output_device` (một phần tên hoặc số thứ tự) |
+| `PortAudioError: Device unavailable [-9985]` | Loa HDMI chỉ cho một chương trình mở. Bản cũ để pygame chiếm loa (đã sửa: không khởi tạo `pygame.mixer`). Nếu còn gặp: `sudo fuser -v /dev/snd/*` để xem ai đang giữ, rồi `hri check speaker` |
+| `Microphone unavailable` / robot không nghe | `arecord -l` không thấy thiết bị nào: màn hình HDMI không có mic, cần cắm mic USB |
+| Muốn phát ra loa khác loa mặc định | Xem danh sách bằng `hri check mic`, rồi đặt `audio.output_device` (một phần tên hoặc số thứ tự) |
 | Windows: `DLL load failed ... filename or extension is too long` | Chuyển repo sang đường dẫn ngắn, ví dụ `C:\dev\hri-robot` |
 | Không cài được `piper_phonemize` | Cài với `-f https://k2-fsa.github.io/icefall/piper_phonemize.html` |
 | TTS không ra tiếng, log báo `phoneme_codepoints is empty` | sherpa-onnx 2.x bỏ espeak-ng; cần cài `piper_phonemize` (code đã dùng sẵn) |
@@ -367,7 +378,7 @@ LLM trả về các câu có thẻ:
 ## 13. Phát triển
 
 ```bash
-pytest                     # 31 test, không cần phần cứng
+pytest                     # 58 test, không cần phần cứng
 ruff check src tests
 ```
 
@@ -381,9 +392,9 @@ src/hri/
   camera/           picamera2 | OpenCV | file (video / thư mục ảnh)
   vision/           YuNet, FER ONNX (fer.py), EMA + baseline (postproc.py), process vision (worker.py)
   affect/           affect summary + ES (aggregator.py), sentiment văn bản, risk
-  audio/            VAD + ASR, TTS (Piper + piper_phonemize), speaker ID
+  audio/            VAD + ASR, TTS (Piper + piper_phonemize)
   llm/              client có fallback, prompts, parser [EMO]
-  dialogue/         app.py (điều phối), micro_loop.py
+  dialogue/         app.py (điều phối, vòng đời phiên), memory.py, micro_loop.py
   ui/               expressions.py, face_renderer.py, test_view.py, display.py (kmsdrm)
 tests/
 ```

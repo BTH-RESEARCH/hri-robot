@@ -42,12 +42,14 @@ class LLMClient:
             raise RuntimeError("No LLM provider available - put an API key in .env (see .env.example)")
         log.info("LLM providers: %s", ", ".join(f"{n}({m})" for n, m, _, _ in self.providers))
 
-    def stream(self, messages: list[dict]) -> Iterator[str]:
-        """Yield text deltas. Falls back to the next provider only if nothing was yielded yet."""
+    def stream(self, messages: list[dict], info: dict | None = None) -> Iterator[str]:
+        """Yield text deltas. Falls back to the next provider only if nothing was yielded yet.
+        info["finish"] = the server's finish_reason; None means the stream was cut off."""
+        info = {} if info is None else info
         errors: list[str] = []
         for name, model, client, extra in self.providers:
             t0 = time.perf_counter()
-            first = True
+            first, info["finish"] = True, None
             try:
                 resp = client.chat.completions.create(
                     model=model, messages=messages, stream=True,
@@ -58,12 +60,15 @@ class LLMClient:
                 for chunk in resp:
                     if not chunk.choices:
                         continue
-                    delta = chunk.choices[0].delta.content or ""
+                    info["finish"] = chunk.choices[0].finish_reason or info["finish"]
+                    delta = (chunk.choices[0].delta.content if chunk.choices[0].delta else None) or ""
                     if delta:
                         if first:
                             log.info("LLM %s TTFT %.0f ms", name, (time.perf_counter() - t0) * 1000)
                             first = False
                         yield delta
+                if first:
+                    raise RuntimeError(f"empty reply (finish={info['finish']})")
                 return
             except Exception as e:
                 if not first:

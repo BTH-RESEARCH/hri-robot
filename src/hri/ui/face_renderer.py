@@ -23,7 +23,7 @@ class FaceRenderer:
     def __init__(self, ui_cfg: dict, controller: FaceController, surface=None):
         """surface=None: open the robot window (hri run). surface=<pygame.Surface>: draw the face into
         that surface only, e.g. a panel of the `hri test` debug window."""
-        from hri.ui.display import configure_sdl, open_display
+        from hri.ui.display import configure_sdl, init_pygame, open_display
 
         configure_sdl(ui_cfg)   # kmsdrm on Pi OS Lite (no desktop)
         import pygame
@@ -31,7 +31,7 @@ class FaceRenderer:
         self.pg = pygame
         self.cfg = ui_cfg
         self.ctrl = controller
-        pygame.init()
+        init_pygame()
         if surface is not None:
             self.screen = surface
         else:

@@ -381,6 +381,10 @@ class FERStream:
         self.segmenter.reset()
         self.calibrating = self.calibrator.enabled
 
+    def cancel_calibration(self) -> None:
+        """Person left / took too long: go on uncalibrated instead of waiting forever."""
+        self.calibrating = False
+
     def update(self, msg: dict) -> AffectFrame | None:
         if msg.get("type") != "fer":
             self._last_t = None

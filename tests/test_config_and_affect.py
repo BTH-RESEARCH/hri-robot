@@ -37,7 +37,7 @@ def test_aggregator_summary_and_speaking_weight():
     for i in range(10):      # speaking: looks happy (mouth motion) -> down-weighted
         agg.add(_msg(101 + i * 0.1, [0.1, 0.8, 0.1], 0.6))
     agg.mark_speaking(101, 102)
-    s = agg.summarize(100, 102, speaker="lan")
+    s = agg.summarize(100, 102, person="lan")
     assert s["face_visible"] and s["dominant"] == "sad" and s["valence"] < 0
     assert s["vs_baseline"] == "unknown"
     assert agg.summarize(200, 201) == {"face_visible": False}
@@ -80,12 +80,11 @@ def test_es_ignores_face_loss_gaps():
 
 # ---------------------------------------------------------------- prompt / turn message
 def test_system_prompt_contains_labels():
-    s = build_system_prompt(["happy", "sad"], user_name="Lan")
-    assert "happy, sad" in s and "Lan" in s and "[EMO:" in s
+    s = build_system_prompt(["happy", "sad"])
+    assert "happy, sad" in s and "[EMO:" in s
     assert "sadness" in s and '"dominant": "sad"' not in s       # examples use FERPlus names
-    for field in ("arousal", "stability", "ROBOT_FACE", "GUIDANCE", "vs_baseline"):
+    for field in ("arousal", "stability", "MEMORY", "ROBOT_FACE", "GUIDANCE", "vs_baseline"):
         assert field in s
-    assert "user" not in build_system_prompt(["happy"], user_name="user").split("\n")[-2]
 
 
 def test_user_message_and_history():

@@ -178,8 +178,26 @@ def cmd_check(cfg: Config, args) -> int:
                      device=cfg.get("audio.input_device"))
         sd.wait()
         print(f"RMS={float(np.sqrt(np.mean(rec ** 2))):.4f} - playing back")
-        sd.play(rec, sr, device=cfg.get("audio.output_device"))
-        sd.wait()
+        _play(cfg, rec, sr)
+
+    elif what == "speaker":
+        # opens the robot window first, like `hri run`: catches anything in the UI that grabs the sound card
+        import numpy as np
+
+        from hri.ui.display import configure_sdl, open_display
+        configure_sdl(cfg.section("ui"))
+        open_display((640, 400), False, "hri check speaker")
+        import pygame as pg
+        sr = 22050
+        t = np.arange(int(sr * 1.5)) / sr
+        try:
+            _play(cfg, (0.3 * np.sin(2 * np.pi * 440 * t)).astype(np.float32), sr)
+        except RuntimeError as e:
+            print(e)
+            return 1
+        finally:
+            pg.quit()
+        print("OK: a 1.5 s tone was played. If you heard nothing: check the screen's volume and its audio input")
 
     elif what == "asr":
         import queue
@@ -284,6 +302,13 @@ def cmd_check(cfg: Config, args) -> int:
 
 
 # ---------------------------------------------------------------- run / chat
+def _play(cfg: Config, samples, sr: int) -> None:
+    from hri.audio.output import Output, convert
+    stream, rate, ch = Output(cfg.get("audio.output_device")).open(sr)
+    with stream as out:
+        out.write(convert(samples, sr, rate, ch))
+
+
 def cmd_test(cfg: Config, args) -> int:
     from hri.ui.test_view import run_test
     return run_test(cfg, seconds=args.seconds, no_calib=args.no_calib, csv_path=args.csv,
@@ -335,7 +360,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_models)
 
     s = sub.add_parser("check", help="test one component")
-    s.add_argument("what", choices=["display", "camera", "fer", "vision", "mic", "asr", "tts", "llm", "face"])
+    s.add_argument("what", choices=["display", "camera", "fer", "vision", "speaker", "mic", "asr", "tts", "llm", "face"])
     s.add_argument("--seconds", type=float, default=5.0)
     s.add_argument("--n", type=int, default=None, help="(fer) number of test images, default all")
     s.add_argument("--no-calib", action="store_true", help="(vision) skip the baseline measurement")

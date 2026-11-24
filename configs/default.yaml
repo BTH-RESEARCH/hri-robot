@@ -8,7 +8,7 @@ app:
 
 paths:
   models_dir: ~/.cache/hri-robot/models   # env HRI_MODELS_DIR overrides
-  data_dir: ~/.local/share/hri-robot      # speaker DB, chat logs, baselines
+  data_dir: ~/.local/share/hri-robot      # research logs, snapshots
 
 models:
   manifest: configs/models.json
@@ -17,7 +17,7 @@ models:
     repo: BTH-RESEARCH/fer_edge
     tag: v0.1.0
   # which manifest entries this profile needs (hri models download)
-  required: [fer, yunet, silero_vad, asr_vi, tts_vi, speaker_embedding]
+  required: [fer, yunet, silero_vad, asr_vi, tts_vi]
 
 camera:
   backend: opencv          # opencv | picamera2
@@ -89,7 +89,7 @@ affect:
   speaking_weight: 0.3       # down-weight frames while user talks (mouth motion confuses FER)
   min_frames: 3
   trend_threshold: 0.05      # valence slope (/s) for rising/falling
-  baseline_alpha: 0.05       # EMA rate of per-speaker neutral baseline
+  baseline_alpha: 0.05       # EMA rate of per-session valence baseline
   incongruence_threshold: 0.6
   stability:                 # Emotional Stability (Fluid-Xpress Eq. 1-2) over the utterance window
     m_max: 0.1               # paper values (EmoNet) - recalibrate on your own sessions
@@ -118,11 +118,6 @@ audio:
     num_threads: 2
     speed: 1.0
     speaker_id: 0
-  speaker_id:
-    enabled: true
-    model: speaker_embedding
-    threshold: 0.6
-    num_threads: 1
 
 llm:
   # tried in order; falls back to the next on error before the first token
@@ -151,7 +146,15 @@ llm:
   temperature: 0.7
   max_tokens: 256
   timeout_sec: 15
-  history_turns: 8
+
+memory:                      # one encounter = one session; RAM only, wiped when the user leaves
+  idle_sec: 45               # session ends after this long with no face AND no speech
+  idle_no_vision_sec: 180    # without a camera: silence only
+  rearm_sec: 5               # after a goodbye, wait until the face is gone this long before greeting again
+  keep_turns: 6              # most recent turns always kept verbatim
+  summarize_every: 4         # older turns are folded into the summary in batches of this size
+  max_turns: 14              # hard cap if summaries keep failing
+  summary_words: 80
 
 expression:
   default: neutral
@@ -162,6 +165,7 @@ cold_start:                  # Initial Engagement Protocol (Fluid-Xpress): calib
   frames: 12                 # calibrated frames (after the baseline) used to pick the greeting
   positive_valence: 0.2      # mean V above -> positive greeting
   negative_valence: -0.2     # mean V below -> supportive greeting
+  timeout_sec: 12            # give up measuring if the person moves or leaves
 
 micro_loop:                  # non-verbal feedback (Fluid-Xpress): 1 s sliding window of V/A
   enabled: true

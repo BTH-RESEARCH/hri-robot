@@ -5,7 +5,7 @@ Key ideas (research contributions you can ablate):
   1. Utterance alignment  - only frames in [speech_start - pre, speech_end] count.
   2. Speaking down-weight - mouth motion during speech confuses FER.
   3. Quality weighting    - detector score, face size, sharpness, model confidence.
-  4. Per-speaker baseline - valence relative to that person's resting face.
+  4. Per-session baseline - valence relative to the current person's usual face.
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ class AffectAggregator:
         self.labels = labels
         self.frames: deque[Frame] = deque()
         self.speaking: deque[tuple[float, float]] = deque(maxlen=200)
-        self.baselines: dict[str, tuple[float, int]] = {}   # speaker -> (valence EMA, n)
+        self.baselines: dict[str, tuple[float, int]] = {}   # session -> (valence EMA, n)
         self.last_face_t = 0.0
         self._lock = threading.Lock()
 
@@ -57,6 +57,14 @@ class AffectAggregator:
             horizon = f.t - float(self.cfg.get("buffer_sec", 60))
             while self.frames and self.frames[0].t < horizon:
                 self.frames.popleft()
+
+    def reset(self) -> None:
+        """New person: forget frames, speaking intervals and the valence baseline."""
+        with self._lock:
+            self.frames.clear()
+            self.speaking.clear()
+            self.baselines.clear()
+            self.last_face_t = 0.0
 
     def mark_speaking(self, t0: float, t1: float) -> None:
         with self._lock:
@@ -76,7 +84,7 @@ class AffectAggregator:
     def _is_speaking(self, t: float) -> bool:
         return any(a <= t <= b for a, b in self.speaking)
 
-    def summarize(self, t0: float, t1: float, speaker: str | None = None) -> dict:
+    def summarize(self, t0: float, t1: float, person: str | None = None) -> dict:
         pre = float(self.cfg.get("pre_utterance_sec", 1.0))
         with self._lock:
             sel = [f for f in self.frames if t0 - pre <= f.t <= t1]
@@ -115,15 +123,15 @@ class AffectAggregator:
             "mssd": None if es is None else round(es["mssd"], 4),
             "pac": None if es is None else round(es["pac"], 3),
         }
-        if speaker:
-            out["vs_baseline"] = self._baseline_delta(speaker, val)
+        if person:
+            out["vs_baseline"] = self._baseline_delta(person, val)
         return out
 
-    def _baseline_delta(self, speaker: str, val: float) -> str:
+    def _baseline_delta(self, person: str, val: float) -> str:
         alpha = float(self.cfg.get("baseline_alpha", 0.05))
-        base, n = self.baselines.get(speaker, (val, 0))
+        base, n = self.baselines.get(person, (val, 0))
         delta = val - base if n >= 3 else 0.0
-        self.baselines[speaker] = (base + alpha * (val - base) if n else val, n + 1)
+        self.baselines[person] = (base + alpha * (val - base) if n else val, n + 1)
         if n < 3:
             return "unknown"
         return "more_positive" if delta > 0.2 else "more_negative" if delta < -0.2 else "typical"

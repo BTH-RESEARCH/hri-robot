@@ -73,11 +73,11 @@ class ASRWorker(threading.Thread):
         self.out_q = out_q
         self.on_start, self.on_end = on_speech_start, on_speech_end
         self.is_muted = is_muted or (lambda: False)
-        self._stop = threading.Event()
+        self._quit = threading.Event()
         self._audio_q: queue.Queue[np.ndarray] = queue.Queue()
 
     def stop(self):
-        self._stop.set()
+        self._quit.set()
 
     def _callback(self, indata, frames, time_info, status):
         if status:
@@ -85,12 +85,19 @@ class ASRWorker(threading.Thread):
         self._audio_q.put(indata[:, 0].copy())
 
     def run(self):
+        try:
+            self._listen()
+        except Exception as e:  # noqa: BLE001 - e.g. no microphone plugged in: say so, keep the robot running
+            log.error("Microphone unavailable, the robot cannot hear: %s\n"
+                      "  Check that a mic is listed by:  arecord -l    then restart (hri check mic)", e)
+
+    def _listen(self):
         buf = np.zeros(0, np.float32)
         in_speech, speech_t0 = False, 0.0
         with sd.InputStream(samplerate=self.sr, channels=1, dtype="float32", blocksize=self.WINDOW,
                             device=self.device, callback=self._callback):
             log.info("ASR listening (sr=%d)", self.sr)
-            while not self._stop.is_set():
+            while not self._quit.is_set():
                 try:
                     chunk = self._audio_q.get(timeout=0.1)
                 except queue.Empty:
@@ -120,4 +127,4 @@ class ASRWorker(threading.Thread):
                     text = transcribe(self.recognizer, seg, self.sr)
                     log.info("ASR (%.0f ms): %s", (time.perf_counter() - t0) * 1000, text)
                     if text:
-                        self.out_q.put(Utterance(text, t_start, t_end, seg))
+                        self.out_q.put(Utterance(text, t_start, t_end))

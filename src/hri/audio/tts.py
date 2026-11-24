@@ -7,8 +7,8 @@ import time
 from collections.abc import Callable
 
 import numpy as np
-import sounddevice as sd
 
+from hri.audio.output import Output, convert
 from hri.models import ModelRegistry, find_file
 
 log = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ class Speaker:
         self.tts = build_tts(reg, tcfg)
         self.sid = int(tcfg.get("speaker_id", 0))
         self.speed = float(tcfg.get("speed", 1.0))
-        self.device = audio_cfg.get("output_device")
+        self.output = Output(audio_cfg.get("output_device"))
         self.playing = threading.Event()
         self._interrupt = threading.Event()
         self._cache: dict[str, tuple[np.ndarray, int]] = {}
@@ -85,14 +85,16 @@ class Speaker:
         self._interrupt.clear()
         self.playing.set()
         try:
-            with sd.OutputStream(samplerate=sr, channels=1, dtype="float32", device=self.device) as out:
-                for i in range(0, len(samples), self.CHUNK):
+            stream, rate, channels = self.output.open(sr)
+            data = convert(samples, sr, rate, channels)
+            with stream as out:
+                for i in range(0, len(data), self.CHUNK):
                     if self._interrupt.is_set():
                         return False
-                    chunk = samples[i:i + self.CHUNK]
+                    chunk = data[i:i + self.CHUNK]
                     if on_level:
                         on_level(float(min(1.0, np.sqrt(np.mean(chunk ** 2)) * 6)))
-                    out.write(chunk.reshape(-1, 1))
+                    out.write(chunk)
             return True
         finally:
             if on_level:
