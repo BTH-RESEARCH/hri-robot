@@ -1,0 +1,15 @@
+# Laptop (Windows / Linux / macOS) - webcam, windowed UI, fp32 FER
+camera:
+  backend: opencv
+  index: 0
+
+vision:
+  target_fps: 15
+
+audio:
+  asr: {num_threads: 4}
+  tts: {num_threads: 4}
+
+ui:
+  fullscreen: false
+  show_debug: true

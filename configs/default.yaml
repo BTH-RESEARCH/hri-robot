@@ -1,0 +1,165 @@
+# Base config. Profiles (laptop.yaml / pi5.yaml) are deep-merged on top of this.
+# Override any key from CLI:  hri run --set llm.temperature=0.5 --set ui.fullscreen=true
+
+app:
+  name: hri-robot
+  language: vi
+  log_level: INFO
+
+paths:
+  models_dir: ~/.cache/hri-robot/models   # env HRI_MODELS_DIR overrides
+  data_dir: ~/.local/share/hri-robot      # speaker DB, chat logs, baselines
+
+models:
+  manifest: configs/models.json
+  # GitHub Release that hosts the FER packs (.ferpack built by the fer_edge export notebooks)
+  release:
+    repo: BTH-RESEARCH/fer_edge
+    tag: v0.1.0
+  # which manifest entries this profile needs (hri models download)
+  required: [fer, yunet, silero_vad, asr_vi, tts_vi, speaker_embedding]
+
+camera:
+  backend: opencv          # opencv | picamera2
+  index: 0
+  width: 640
+  height: 480
+  fps: 30
+  flip_horizontal: true
+
+vision:
+  enabled: true
+  target_fps: 10           # FER inference rate (not camera rate)
+  face_detector:
+    model: yunet
+    score_threshold: 0.8
+    min_face_size: 40      # px (same as the FER demo)
+    margin: 0.15           # square crop, enlarged by margin on each side (same as the FER demo)
+  fer:
+    model: fer             # manifest key -> folder with model.onnx + fer.json
+    # Preprocessing (classes, img_size, grayscale, train_res, mean/std) is read from the pack's fer.json,
+    # so it always matches training. FERPlus: gray -> 48x48 (BOX) -> RGB -> 224 (BILINEAR) -> ImageNet norm.
+    num_threads: 2
+  # Temporal post-processing inherited from fer_resnet_demo (v2 pipeline)
+  smoothing:
+    alpha: 0.3             # EMA weight of the new frame
+    reset_after: 10        # frames without a face before the EMA history is cleared
+  baseline:                # personal resting-face calibration (fer_demo/calibration.py)
+    enabled: true
+    calib_seconds: 3.0     # user looks at the robot with a resting face
+    min_samples: 5
+    neutral_margin: 0.15
+    gain: 1.5              # boost of classes above the baseline
+    adaptive_momentum: 0.0 # >0: slowly update P_base while the user is neutral
+
+affect:
+  buffer_sec: 60
+  pre_utterance_sec: 1.0     # frames before speech onset also count
+  speaking_weight: 0.3       # down-weight frames while user talks (mouth motion confuses FER)
+  min_frames: 3
+  trend_threshold: 0.05      # valence slope (/s) for rising/falling
+  baseline_alpha: 0.05       # EMA rate of per-speaker neutral baseline
+  incongruence_threshold: 0.6
+  stability:                 # Emotional Stability (Fluid-Xpress Eq. 1-2) over the utterance window
+    m_max: 0.1               # paper values (EmoNet) - recalibrate on your own sessions
+    p_max: 0.3
+    acute_threshold: 0.15    # |dV| or |dA| per step counted as an acute change (not given in the paper)
+    resample_hz: 5           # fixed rate so ES is comparable between laptop and Pi5 (0 = off)
+    max_gap_sec: 0.5         # no successive difference across face-loss gaps
+
+audio:
+  sample_rate: 16000
+  input_device: null         # name or index; null = system default
+  output_device: null
+  barge_in: false            # true needs echo cancellation / headset
+  vad:
+    model: silero_vad
+    threshold: 0.5
+    min_silence_duration: 0.5
+    min_speech_duration: 0.25
+    max_speech_duration: 15
+  asr:
+    model: asr_vi
+    num_threads: 2
+    decoding_method: greedy_search
+  tts:
+    model: tts_vi
+    num_threads: 2
+    speed: 1.0
+    speaker_id: 0
+  speaker_id:
+    enabled: true
+    model: speaker_embedding
+    threshold: 0.6
+    num_threads: 1
+
+llm:
+  # tried in order; falls back to the next on error before the first token
+  # Measured 2026-11: gemini-3.5-flash-lite TTFT ~1.1 s. Avoid non-lite "flash" models for dialogue:
+  # they "think" first (TTFT 6-10 s) and thinking tokens eat max_tokens -> truncated replies.
+  # gemini-2.5-flash is still listed by the API but returns 404 for chat.
+  # List models your key can use:  hri check llm --list-models
+  providers:
+    - name: gemini
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+      model: gemini-3.5-flash-lite        # pinned version -> reproducible experiments
+      api_key_env: GEMINI_API_KEY
+    - name: gemini-fallback               # same key, Google's moving alias
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+      model: gemini-flash-lite-latest
+      api_key_env: GEMINI_API_KEY
+    - name: groq                          # 403 "Access denied" = region/network block, not a code issue
+      base_url: https://api.groq.com/openai/v1
+      model: llama-3.3-70b-versatile
+      api_key_env: GROQ_API_KEY
+    - name: openrouter
+      base_url: https://openrouter.ai/api/v1
+      model: google/gemma-4-31b-it:free
+      api_key_env: OPENROUTER_API_KEY
+      # optional per provider: extra_body: {...}  (passed through to the API)
+  temperature: 0.7
+  max_tokens: 256
+  timeout_sec: 15
+  history_turns: 8
+
+expression:
+  default: neutral
+  # the ONLY labels the LLM may emit in [EMO:label|intensity]
+  allowed: [neutral, happy, sad, surprised, empathy, thinking, curious, concerned, excited, calm]
+
+cold_start:                  # Initial Engagement Protocol (Fluid-Xpress): calibrate, then greet
+  frames: 12                 # calibrated frames (after the baseline) used to pick the greeting
+  positive_valence: 0.2      # mean V above -> positive greeting
+  negative_valence: -0.2     # mean V below -> supportive greeting
+
+micro_loop:                  # non-verbal feedback (Fluid-Xpress): 1 s sliding window of V/A
+  enabled: true
+  update_sec: 1.0            # how often the robot re-evaluates its face
+  window_sec: 1.0
+  min_frames: 3              # fewer frames in the window -> keep the current face
+  positive_valence: 0.2      # V >= -> Mirroring
+  negative_valence: -0.2     # V <= -> Support
+  high_arousal: 0.5          # A >= (and V not positive) -> De-escalation
+  min_intensity: 0.3
+  max_intensity: 0.8
+
+safety:
+  enabled: true
+  negative_valence_threshold: -0.6
+  keywords: ["muốn chết", "tự tử", "không muốn sống", "tự làm hại", "kết thúc tất cả", "chán sống"]
+  support_message: "Mình rất tiếc khi bạn đang cảm thấy như vậy. Bạn không một mình đâu. Nếu bạn đang gặp nguy hiểm, hãy gọi ngay cho người thân hoặc đường dây hỗ trợ khẩn cấp nhé."
+
+test_ui:                     # `hri test` debug window (camera + FER results + robot face)
+  width: 1100
+  height: 620
+
+ui:
+  enabled: true
+  fullscreen: false
+  width: 800
+  height: 480
+  fps: 30
+  sdl_videodriver: auto      # auto = kmsdrm on Linux without X/Wayland (Pi OS Lite), SDL default otherwise
+  background: [10, 10, 18]
+  face_color: [80, 220, 255]
+  show_debug: false

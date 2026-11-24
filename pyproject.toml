@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hri-robot"
+version = "0.1.0"
+description = "Emotion-aware HRI robot: FER + STT -> LLM -> TTS + 2D facial expressions (laptop & Raspberry Pi 5)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # Pi OS Bookworm: picamera2/simplejpeg (apt) are built against numpy 1.x -> keep numpy<2 on aarch64
+    "numpy>=1.24,<2; platform_machine == 'aarch64'",
+    "numpy>=1.24; platform_machine != 'aarch64'",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "onnxruntime>=1.17",
+    "opencv-python-headless>=4.8",
+    "sherpa-onnx==2.0.3",
+    # sherpa-onnx 2.x dropped built-in espeak-ng; Piper TTS needs external phonemes.
+    # Wheels: pip install ... -f https://k2-fsa.github.io/icefall/piper_phonemize.html
+    "piper_phonemize>=1.5",
+    "sounddevice>=0.4.6",
+    "openai>=1.40",
+    # Pi (aarch64): pip's pygame bundles an SDL WITHOUT kmsdrm -> cannot draw on Pi OS Lite.
+    # There we use Debian's python3-pygame (apt, seen through --system-site-packages; scripts/setup_pi.sh).
+    "pygame>=2.1; platform_machine != 'aarch64'",
+    "pillow>=10.0",   # FER preprocessing must match training exactly (PIL BOX / BILINEAR resize)
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.4"]
+
+[project.scripts]
+hri = "hri.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110

@@ -1,0 +1,46 @@
+{
+  "_comment": "url may use {release_repo} and {release_tag} (from config models.release). archive: true = tarball with a top-level folder, \"zip\" = flat pack (.ferpack) extracted into dirname. sha256=null skips verification.",
+  "models": {
+    "fer": {
+      "_note": "ResNet-18 FERPlus fp32 (acc 83.39, agree_torch 100%) - .ferpack = model.onnx + fer.json + 500-image parity testset",
+      "url": "https://github.com/{release_repo}/releases/download/{release_tag}/resnet18-ferplus-fp32.ferpack",
+      "archive": "zip",
+      "dirname": "resnet18-ferplus-fp32",
+      "sha256": "d9f4319d88c3917af0f8510fd6d4ac6ccafbf5af8b37a3a92e16564c056090e2"
+    },
+    "fer_int8": {
+      "_note": "optional: static int8 (acc 81.31, agree_torch 92.9%) - not required by any profile yet",
+      "url": "https://github.com/{release_repo}/releases/download/{release_tag}/resnet18-ferplus-int8s.ferpack",
+      "archive": "zip",
+      "dirname": "resnet18-ferplus-int8s",
+      "sha256": "56282129c3fdca03d34b6ae82415be87d1c0225f20254a3ef81eab563fdccf87"
+    },
+    "yunet": {
+      "url": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+      "filename": "face_detection_yunet_2023mar.onnx",
+      "sha256": null
+    },
+    "silero_vad": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
+      "filename": "silero_vad.onnx",
+      "sha256": null
+    },
+    "asr_vi": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-vi-2025-04-20.tar.bz2",
+      "archive": true,
+      "dirname": "sherpa-onnx-zipformer-vi-2025-04-20",
+      "sha256": null
+    },
+    "tts_vi": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-vi_VN-vais1000-medium.tar.bz2",
+      "archive": true,
+      "dirname": "vits-piper-vi_VN-vais1000-medium",
+      "sha256": null
+    },
+    "speaker_embedding": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
+      "filename": "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
+      "sha256": null
+    }
+  }
+}

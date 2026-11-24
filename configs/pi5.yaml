@@ -1,0 +1,25 @@
+# Raspberry Pi 5 (8GB) - CSI camera via picamera2, fullscreen LCD, fp32 FER (same model as the laptop)
+# 4 cores: FER process 2 threads, ASR 2, TTS 2 (they rarely run at the same time)
+# To try int8 later:  hri models download fer_int8  &&  hri run --set vision.fer.model=fer_int8
+camera:
+  backend: picamera2
+  width: 640
+  height: 480
+
+vision:
+  target_fps: 8
+  fer:
+    num_threads: 2
+
+audio:
+  asr: {num_threads: 2}
+  tts: {num_threads: 2}
+
+test_ui:            # fits an 800x480 LCD
+  width: 800
+  height: 480
+
+ui:
+  fullscreen: true
+  show_debug: false
+  # sdl_videodriver: auto -> kmsdrm on Pi OS Lite, x11/wayland on Pi OS Desktop (see configs/default.yaml)

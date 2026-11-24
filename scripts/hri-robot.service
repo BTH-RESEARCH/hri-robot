@@ -1,0 +1,21 @@
+# Autostart on the Pi (repo cloned to ~/hri-robot), works on Pi OS Lite (kmsdrm, no desktop):
+#   mkdir -p ~/.config/systemd/user && cp scripts/hri-robot.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now hri-robot
+#   sudo loginctl enable-linger $USER    # start at boot without logging in
+#   journalctl --user -u hri-robot -f    # logs
+[Unit]
+Description=HRI emotion-aware robot
+Wants=network-online.target
+After=network-online.target sound.target
+
+[Service]
+WorkingDirectory=%h/hri-robot
+ExecStart=%h/hri-robot/.venv/bin/hri --profile pi5 run
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+# Pi OS Lite: draw directly on the LCD through DRM/KMS (no X/Wayland)
+Environment=SDL_VIDEODRIVER=kmsdrm
+
+[Install]
+WantedBy=default.target
