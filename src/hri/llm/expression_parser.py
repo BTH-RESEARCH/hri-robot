@@ -9,10 +9,11 @@ import re
 from dataclasses import dataclass
 
 TAG_RE = re.compile(r"\[EMO:\s*([a-zA-Z_]+)\s*(?:\|\s*(-?[0-9]*\.?[0-9]+))?\s*\]")
+TOPIC_RE = re.compile(r"\[TOPIC:\s*([^\]]{1,60})\]\s*")
 SENT_END_RE = re.compile(r"([.!?…]+)(\s+|$)")
 # anything TTS should not read: markdown symbols, emoji, brackets
 CLEAN_RE = re.compile(r"[*_#`>~\[\]]|[\U0001F000-\U0001FAFF☀-➿]")
-MAX_TAG_LEN = 40
+MAX_TAG_LEN = 75
 
 
 @dataclass
@@ -23,11 +24,12 @@ class Segment:
 
 
 class ExpressionStreamParser:
-    def __init__(self, allowed: list[str], default: str = "neutral", soft_split_chars: int = 80):
+    def __init__(self, allowed: list[str], default: str = "neutral", soft_split_chars: int = 240):
         self.allowed = set(allowed)
         self.default = default
         self.soft_split = soft_split_chars
         self.emotion, self.intensity = default, 0.5
+        self.topic: str | None = None
         self._raw = ""    # unparsed input
         self._text = ""   # plain text under the current emotion, not yet emitted
 
@@ -37,6 +39,14 @@ class ExpressionStreamParser:
 
     def flush(self) -> list[Segment]:
         return self._drain(final=True)
+
+    def flush_complete(self) -> list[Segment]:
+        """The stream was cut off: only what already ends like a sentence, never a half one."""
+        text = self._text.rstrip()
+        if not text.endswith((".", "!", "?", "…")):
+            return []
+        self._text = text
+        return self._take(force=True)
 
     # ------------------------------------------------------------------
     def _normalize(self, name: str, value: str | None) -> tuple[str, float]:
@@ -58,6 +68,11 @@ class ExpressionStreamParser:
                 break
             self._text += self._raw[:lb]
             self._raw = self._raw[lb:]
+            m = TOPIC_RE.match(self._raw)
+            if m:
+                self.topic = m.group(1).strip().lower()
+                self._raw = self._raw[m.end():]
+                continue
             m = TAG_RE.match(self._raw)
             if m:
                 out += self._take(force=True)      # emotion changes -> flush text of the old one
@@ -76,6 +91,12 @@ class ExpressionStreamParser:
         pos = 0
         text = self._text
         for m in SENT_END_RE.finditer(text):
+            rest = text[m.end():]
+            if not rest and not force:
+                break                               # more may follow ("ò." -> "ò...", "3." -> "3.5"): wait
+            if len(m.group(1)) > 1 and "!" not in m.group(1) and "?" not in m.group(1) or m.group(1) == "…":
+                if rest[:1].islower():
+                    continue                        # "ò... o... một tiếng" is one sentence
             segs.append(self._seg(text[pos:m.end(1)]))
             pos = m.end()
         tail = text[pos:]
@@ -87,7 +108,7 @@ class ExpressionStreamParser:
             segs.append(self._seg(tail))
             tail = ""
         self._text = tail
-        return [s for s in segs if s.text]
+        return [s for s in segs if any(c.isalnum() for c in s.text)]
 
     def _seg(self, text: str) -> Segment:
         clean = re.sub(r"\s+", " ", CLEAN_RE.sub("", text)).strip()

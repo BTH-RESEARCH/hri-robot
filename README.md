@@ -1,21 +1,22 @@
 # hri-robot
 
-Robot tương tác người–máy (HRI) có nhận biết cảm xúc, chạy trên **Raspberry Pi 5** và **laptop** với cùng một codebase.
+Robot hỗ trợ **phụ huynh** chơi và dạy **trẻ nhỏ chưa biết nói**: phụ huynh ra lệnh bằng giọng nói, trẻ chỉ phản ứng bằng nét mặt. Chạy trên **Raspberry Pi 5** và **laptop** với cùng một codebase. Nguyên mẫu nghiên cứu, luôn dùng dưới sự giám sát của người lớn, **chưa thử nghiệm với trẻ em**.
 
 ```
- Camera ─► YuNet ─► ResNet-18 FER ─► EMA + baseline cá nhân ─► V/A ─┬─► Micro-loop (mỗi 1 s): khuôn mặt robot phản xạ
-                                                                    │     Mirroring / Support / De-escalation / Attentive
- Mic ─► VAD ─► ASR tiếng Việt ─► Affect summary ────────────────────┴─► Intervention logic ─┬─► Hỗ trợ khẩn tại chỗ (không qua LLM)
-                                                (ES, trend, lệch lời–mặt)                  └─► LLM (Gemini) ─► [EMO:x|i] câu…
-                                                                                                 ─► TTS tiếng Việt + khuôn mặt robot
+PHỤ HUYNH ─ mic ─► VAD/ASR ─► lệnh ──► INTERVENTION LOGIC ──► LLM + trí nhớ phiên ─► [TOPIC][EMO] câu… ─► TTS + mặt robot
+                                              ▲                                                            │
+TRẺ ─ camera ─► mặt vùng giữa ─► ResNet-18 ─► hậu xử lý ─► frame queue ─► 4 NHÓM ─► micro-loop: mặt robot   │ robot nói
+   ▲                                                          │                                            │
+   │                                                          ├─► phản ứng với nội dung đang nghe ─► thích / không thích, nhịp đọc
+   └────────────────────── trẻ phản ứng ◄─────────────────────┴─► khó chịu kéo dài: dừng, trấn an, báo phụ huynh
 ```
 
-- **FER:** ResNet-18 huấn luyện trên FERPlus (8 lớp), chạy bằng ONNX Runtime. Hậu kỳ kế thừa `fer_resnet_demo` v2 (V3b: sensitivity → baseline cá nhân → hysteresis + 2 luật sinh lý); detector là YuNet.
+- **FER:** ResNet-18 (FERPlus, 8 lớp) chạy cục bộ bằng ONNX Runtime; ảnh không rời thiết bị. Lời phụ huynh (dạng chữ) và nhóm trạng thái của bé có gửi lên LLM.
 - **STT / TTS:** sherpa-onnx 2.0.3 (Zipformer tiếng Việt, Piper `vi_VN-vais1000`). Không nhận diện hay lưu giọng nói của người dùng.
 - **Trí nhớ:** theo phiên gặp mặt, chỉ nằm trong RAM, xóa khi người dùng rời đi.
 - **LLM:** API tương thích OpenAI; mặc định Gemini `gemini-3.5-flash-lite`, có provider dự phòng.
-- **Khuôn mặt robot:** vẽ bằng tham số với pygame; LLM chọn biểu cảm qua thẻ `[EMO:nhãn|cường độ]`.
-- **Kiến trúc hai vòng lặp:** theo bài Fluid-Xpress (HRI '26). Micro-loop phản xạ không lời, macro-loop trả lời bằng lời.
+- **Khuôn mặt robot:** đôi mắt phát sáng theo thiết kế `faces/index.html`, vẽ bằng pygame (Pi OS Lite không có trình duyệt); LLM chọn biểu cảm qua thẻ `[EMO:nhãn|cường độ]`.
+- **Hai vòng lặp:** lấy cảm hứng từ Fluid-Xpress (HRI '26), đổi cho trường hợp người nói và người được quan sát là hai người.
 
 ---
 
@@ -173,7 +174,7 @@ Nên chạy lần lượt khi cài trên máy mới:
 | `hri check face` | khuôn mặt robot, lần lượt các biểu cảm | không cần model |
 | `hri check fer` | ONNX + tiền xử lý trên máy này khớp PyTorch | `agree=100.0%`, `acc≈83.4%` |
 | `hri check camera` | camera | in số FPS |
-| `hri check vision --seconds 20` | camera → FER → baseline → micro-loop (in chữ) | nhãn và V/A thay đổi theo mặt bạn |
+| `hri check vision --seconds 20` | camera → mặt vùng giữa → FER → 4 nhóm → micro-loop (in chữ) | nhãn và nhóm đổi theo mặt |
 | `hri check speaker` | loa, trong lúc cửa sổ robot đang mở | nghe tiếng bíp 1.5 s |
 | `hri check mic` | liệt kê thiết bị âm thanh, thu 5 s rồi phát lại | nghe được tiếng mình |
 | `hri check asr --seconds 15` | nhận dạng tiếng Việt | in câu bạn nói |
@@ -188,19 +189,14 @@ Nên chạy lần lượt khi cài trên máy mới:
 ```bash
 hri test                       # mở cửa sổ; trên Pi OS Lite là toàn màn hình LCD
 hri test --csv logs/fer.csv    # ghi kết quả từng frame ra CSV
-hri test --no-calib            # bỏ qua bước đo baseline 3 s
+hri test --no-calib            # không học nét mặt bình thường
 ```
 Màn hình hiển thị:
-- **Bên trái:** camera (đã lật gương) với khung mặt từ YuNet, 5 điểm mốc, nhãn và độ tin cậy.
-- **Bên phải:**
-  - `raw X > calib Y > Z`: nhãn thô của model → argmax sau sensitivity + baseline → nhãn ổn định sau hysteresis (`(rest)` = đang ở vùng nghỉ neutral giữa hai biểu cảm).
-  - 8 thanh xác suất: thanh màu là sau sensitivity + baseline, vạch trắng là đầu ra thô của model.
-  - Biểu đồ valence–arousal, ES 5 s, xu hướng.
-  - Chiến lược micro-loop.
-  - Khuôn mặt robot phản ứng trực tiếp.
-- **Phím tắt:** `c` đo lại baseline · `s` chụp màn hình (lưu vào `~/.local/share/hri-robot/snapshots/`) · `q`/`Esc` thoát.
+- **Bên trái:** camera (đã lật gương), khung xanh là **vùng giữa**; khung dày có số `#` là mặt đang theo dõi, khung xám là mặt bị bỏ qua.
+- **Bên phải:** `thô > hiệu chuẩn > ổn định`, 8 thanh xác suất (vạch trắng là đầu ra thô), 4 nhóm trong 5 s, phản ứng và khuôn mặt robot.
+- **Phím tắt:** `c` đo lại baseline · `s` chụp màn hình (`~/.local/share/hri-robot/snapshots/`) · `q`/`Esc` thoát.
 
-Trong **3 giây đầu**, hãy nhìn vào camera với nét mặt bình thường để hệ thống đo baseline cá nhân.
+Trong **3 giây đầu** thấy mặt, hãy để nét mặt bình thường: hệ thống đo baseline cá nhân từ các frame này. Trước khi đo xong hiện `not calibrated`; bấm `c` để đo lại.
 
 ### `hri run` — chạy robot đầy đủ
 ```bash
@@ -209,16 +205,16 @@ hri run --no-vision            # không dùng camera
 hri run --set ui.fullscreen=false
 ```
 Trình tự:
-1. Robot chờ có người trước camera.
-2. Đo baseline 3 s (robot hiện mặt "listening").
-3. Lấy 12 frame để chọn lời chào: tích cực, trung tính hoặc hỗ trợ.
-4. Hội thoại: bạn nói → robot hiện mặt "thinking" và micro-loop tiếp tục phản xạ → robot trả lời (giọng nói + biểu cảm theo từng câu).
+1. Đặt camera **chỉ hướng vào bé**, bé ở giữa khung hình. Robot chào khi thấy mặt, hoặc khi phụ huynh nói.
+2. Phụ huynh ra lệnh: "kể cho bé nghe về con mèo", "kể tiếp", "nãy giờ bé thích cái nào".
+3. Trong lúc robot nói, hệ thống quan sát bé, ghi chủ đề bé có vẻ thích hoặc không thích và đổi nhịp đọc.
+4. Bé có vẻ khó chịu liên tục 4 giây: robot dừng nội dung, trấn an và báo phụ huynh (không qua LLM).
 
-Phím trên cửa sổ robot: `c` đo lại baseline · `n` sang người mới (xóa trí nhớ, chào lại) · `q`/`Esc` thoát.
+Phím trên cửa sổ robot: `c` đo lại baseline · `n` sang bé khác (xóa trí nhớ, chào lại) · `q`/`Esc` thoát.
 
 ### `hri chat` — gõ phím thay cho mic (dùng để thử LLM / prompt)
 ```bash
-hri chat --no-vision --no-tts --fake-emotion sadness   # giả lập FER, không cần camera
+hri chat --no-vision --no-tts --fake-emotion sadness   # giả lập nét mặt bé (8 nhãn hoặc 4 nhóm)
 hri chat                                               # có camera, gõ phím thay mic
 ```
 
@@ -258,12 +254,13 @@ Các nhóm tham số chính:
 | `vision.sensitivity.*` | bật/tắt, trọng số độ nhạy theo lớp |
 | `vision.baseline.*` | `calib_seconds`, `max_non_neutral`, `neutral_margin`, `dynamic_neutral_suppress`, `class_gains` |
 | `vision.hysteresis.*` | `t_min`, `min_dwell_s`, `neutral_bridge_s`, `fade_grace_s`, `transition_dynamics`, ngưỡng theo lớp |
-| `vision.smoothing.*` | EMA (mặc định tắt, như demo), `reset_after` |
-| `cold_start.*` | số frame, ngưỡng V để chọn lời chào |
-| `micro_loop.*` | `update_sec`, `window_sec`, ngưỡng V/A cho từng chiến lược, cường độ biểu cảm |
-| `affect.*` | cửa sổ của lượt nói, trọng số frame lúc đang nói, `stability.*` (M_max, P_max, ngưỡng bước nhảy, lấy mẫu lại) |
-| `audio.*` | thiết bị vào/ra, VAD, ASR, TTS (`speed`, `speaker_id` = giọng đọc của robot), `barge_in` |
-| `llm.*` | danh sách provider, `temperature`, `max_tokens` |
+| `vision.smoothing.*` | EMA chỉ để đối chứng, `reset_after` |
+| `vision.child_zone.*` | vùng giữa, thời gian giữ và đổi khuôn mặt |
+| `micro_loop.*` | chu kỳ, cường độ, `pace` (nhịp đọc theo nhóm) |
+| `child.*` | hàng đợi trạng thái, ngưỡng vắng mặt, `distress.*` (khó chịu kéo dài) |
+| `audio.*` | thiết bị vào/ra, VAD, ASR, TTS (`speed`, `speaker_id` = giọng đọc của robot) |
+| `audio.vad.pre_roll_sec`, `audio.tts.tail_sec` | đệm trước tiếng nói (chống mất từ đầu), im lặng trước khi đóng loa (chống mất chữ cuối) |
+| `llm.*` | danh sách provider, `temperature`, `max_tokens`, `sentences_child` / `sentences_parent` |
 | `memory.*` | thời gian chờ kết thúc phiên, số lượt giữ nguyên văn, nhịp và độ dài tóm tắt |
 | `expression.allowed` | các nhãn `[EMO]` LLM được dùng |
 | `safety.*` | từ khóa nguy cơ, câu hỗ trợ khẩn |
@@ -277,6 +274,9 @@ hri test --set camera.backend=file --set camera.source=samples/video.mp4
 ---
 
 ## 10. Cách hệ thống hoạt động
+
+### Chọn khuôn mặt của bé
+Chỉ theo dõi mặt có tâm nằm trong vùng giữa (50% bề ngang), bám cùng một mặt; mặt khác phải ở lại 2 s mới được theo dõi và nhận số mới cùng baseline riêng. **Vùng giữa không chứng minh đó là trẻ.**
 
 ### Hậu kỳ FER (kế thừa `fer_resnet_demo` v2, biến thể V3b)
 ```
@@ -294,51 +294,67 @@ camera → YuNet → crop vuông (margin 0.15) → ResNet-18 → softmax
 - Đã kiểm tra trùng khớp với code demo: 13.500 frame ngẫu nhiên, lệch xác suất ≤ 1e-7, **0 frame lệch nhãn**.
 - EMA không còn nằm trong chuỗi, giống demo (`vision.smoothing.enabled: false`). Mỗi khâu đều tắt được (`enabled: false`, `transition_dynamics: false` = V3a) để làm ablation.
 - Không kế thừa: pedagogy. Detector: YuNet thay cho YOLO.
+- Đo giả lập từng khâu so với EMA: `python scripts/eval_postproc.py`.
 
-### Micro-loop (phản xạ không lời)
-```
-xác suất sau baseline → V/A (bảng circumplex Russell)
-  → mỗi 1 s, V/A trung bình (theo chất lượng) của 1 s gần nhất:
-      A ≥ 0.5 và V < 0.2 → De-escalation (calm)
-      V ≥ 0.2            → Mirroring    (happy / surprised theo nhãn ổn định của người dùng)
-      V ≤ −0.2           → Support      (empathy / concerned theo nhãn ổn định)
-      còn lại            → Attentive    (listening)
-```
-- V/A lấy từ **xác suất sau baseline** (liên tục, giữ được cường độ cho ES/MSSD). **Nhãn ổn định** từ hysteresis dùng để chọn biểu cảm robot và làm trường `dominant` gửi cho LLM.
-- Micro-loop chạy khi robot đang chờ, đang nghe và lúc chờ LLM. Khi robot nói, thẻ `[EMO]` của LLM điều khiển khuôn mặt.
+### Bốn nhóm (tín hiệu GIÁN TIẾP)
 
-### Affect summary cho mỗi lượt nói
-Lấy các frame trong khoảng [bắt đầu nói − 1 s, kết thúc nói], tính trọng số theo chất lượng khuôn mặt và giảm trọng số frame lúc người dùng đang nói. Kết quả gồm:
-- `dominant`, `dist`, `valence`, `arousal`, `trend`, `confidence`
-- **`stability` = Emotional Stability** theo Fluid-Xpress: `ES = max(0, 1 − ½[min(MSSD/0.1, 1) + min(PAC/0.3, 1)])`, tính trên V và A đã lấy mẫu lại về 5 Hz (để laptop và Pi so sánh được) và không tính bước nhảy qua chỗ mất mặt
-- `vs_baseline`, `text_vs_face` (lời nói lệch với nét mặt), `risk`
+| Nhóm | Nhãn gốc | Mặt robot | Nhịp đọc | LLM |
+|---|---|---|---|---|
+| `neutral_focus` | neutral | listening | ×1.0 | giữ nhịp |
+| `enjoy_curious` | happiness, surprise | happy / curious | ×1.0 | mở rộng điều bé thích |
+| `confused_sad` | sadness, fear | empathy / concerned | ×0.85 | chậm lại, trấn an, nói đơn giản hơn |
+| `dislike_distracted` | anger, disgust, contempt, **mất mặt** | calm (mất mặt: curious) | ×0.95 | rút ngắn, đổi chủ đề, cho nghỉ |
 
-### Intervention logic
-- **`risk = high`** (từ khóa nguy cơ): robot hỗ trợ ngay tại chỗ, không gọi LLM. Lượt sau LLM nhận dòng `GUIDANCE` để nói tiếp mạch đó (Response Guidance).
-- **`risk = elevated`** (valence rất âm và ổn định): được đưa vào prompt để LLM ưu tiên lắng nghe.
+Ba nhãn anger, disgust, contempt chỉ tính vào `dislike_distracted` khi **model thô** cho tổng ít nhất `child.dislike_min_raw` (0.15); nếu không thì là `neutral_focus`. Hậu xử lý khuếch đại mạnh ba lớp này, nên thiếu điều kiện trên thì 2% disgust thô đã đủ bật nhóm. Điều kiện chỉ ở tầng nhóm: nhãn và xác suất không đổi.
+
+FERPlus không có lớp "bối rối" hay "xao nhãng": hai khái niệm này chỉ được suy ra.
+
+### Vòng quan sát
+- LLM gắn thẻ `[TOPIC:con mèo]` cho mỗi câu trả lời. Cửa sổ từ lúc robot bắt đầu nói tới 0.7 s sau khi nói xong cho ra `liked` / `disliked` / `unclear`. Chưa hiệu chuẩn thì luôn là `unclear`.
+- Trung bình theo chủ đề thành `LIKES` / `DISLIKES` của phiên, gửi cho LLM ở lượt sau.
+- Khó chịu (`confused_sad` hoặc `dislike_distracted` **trên mặt nhìn thấy được, đã hiệu chuẩn**) ≥ 80% của 4 s: dừng lời đang nói, trấn an, báo phụ huynh; nghỉ 60 s trước lần tiếp theo. Mất mặt không kích hoạt.
+- Phụ huynh nhắc tự làm hại bản thân (từ khóa): trả lời hỗ trợ tại chỗ, không qua LLM.
+
+### Lượt nói
+- Mic **tắt trong suốt lượt nói** của robot (kể cả giữa hai câu) vì chưa có khử tiếng vọng; **chấm xanh** ở góc trên bên phải báo mic đã mở. Phụ huynh chờ robot nói xong.
+- Loa mở một lần cho cả lượt và phát thêm im lặng trước khi đóng, vì HDMI và Bluetooth còn giữ âm thanh sau khi driver báo xong.
+- Mỗi câu nhận dạng được lấy thêm 0.4 s âm thanh trước lúc VAD phát hiện tiếng nói, không lấn sang câu trước hay lời robot.
+- Nói với bé 4 đến 5 câu, nói với ba mẹ 2 đến 3 câu; LLM tự nhận ra đang nói với ai.
+
+### Khuôn mặt robot
+Port từ `faces/index.html`: cùng hình học 800×480 (tự co theo màn hình), mí, trái tim, vệt sáng, quầng sáng, chớp mắt, liếc, thở, mở mắt khi khởi động.
+
+| Nguồn | Biểu cảm |
+|---|---|
+| Giữ nguyên thiết kế | `neutral`, `happy`, `sad`, `surprised`, `love`, `sleepy`, `sleep` |
+| Suy ra từ thiết kế | `curious` (mắt `neutral` phóng to nhẹ), `excited` (surprised + happy), `empathy` và `concerned` (sad nhẹ), `calm`, `thinking` (liếc lên), `listening` |
+| Không dùng | `angry`, `suspicious` (robot không tỏ vẻ dữ với bé), `confused`. Vẫn có trong `DESIGN` ở `ui/expressions.py` |
+
+Thiết kế không có miệng nên mắt **nhịp theo giọng nói**. Không có ai thì robot ngủ (`sleep`). Xem tất cả: `hri check face`. Chỉnh `ui.face_color`, `ui.glow`, `ui.eye_size`, `ui.scanlines` (mặc định tắt: mắt trơn; `true`: mắt sọc), `ui.idle_motion`.
 
 ### Trí nhớ theo phiên
 - **Bắt đầu** khi có người trước camera (hoặc có người nói). **Kết thúc** khi không thấy mặt *và* không ai nói trong `memory.idle_sec` (45 s), khi người dùng tạm biệt, hoặc bấm `n`. Không dùng camera thì chỉ tính im lặng (180 s).
 - Giữ nguyên văn 6–9 lượt gần nhất (gồm cả lời chào). Đủ 10 lượt, 4 lượt cũ nhất được LLM gộp vào bản tóm tắt khoảng 80 từ, chạy nền sau khi robot nói xong.
 - Chỉ nằm trong RAM; hết phiên thì xóa. Log nghiên cứu JSONL vẫn ghi từng lượt (không ghi bản tóm tắt).
-- Câu trả lời bị ngắt giữa chừng: câu dở không được đọc và không vào trí nhớ; nếu chưa đọc được câu nào thì tự thử lại một lần.
+- Câu trả lời bị ngắt giữa chừng: câu dở không được đọc và không vào trí nhớ; robot tự gọi lại (tối đa `llm.max_attempts` lần) và **nói tiếp** từ câu đã đọc.
 - Giới hạn: hai người đổi chỗ trong chưa đầy 45 s dùng chung một phiên (bấm `n` để tách).
 
 ### Tin nhắn gửi LLM mỗi lượt
 ```
 MEMORY: ...                            ← tóm tắt phần cũ của phiên, nếu có
-AFFECT: {"face_visible": true, "dominant": "sadness", "valence": -0.45, "arousal": -0.2, "trend": "falling",
-         "stability": 0.8, "confidence": 0.7, "text_vs_face": "incongruent", "risk": "low"}
-ROBOT_FACE: empathy (support)          ← biểu cảm micro-loop đang hiện
-GUIDANCE: ...                          ← chỉ có sau một lần hỗ trợ khẩn
-Người dùng: Mình ổn mà.
+CHILD: {"visible": true, "group": "enjoy_curious", "dominance": 0.8, "trend": "stable", "calibrated": true}
+REACTION: {"topic": "con mèo", "verdict": "liked"}   ← phản ứng với lần nói trước
+LIKES: con mèo / DISLIKES: con sư tử                 ← trong phiên này
+ROBOT_FACE: happy                                    ← micro-loop đang hiện
+GUIDANCE: ...                                        ← sau khi robot tự can thiệp, hoặc lệnh quá chung chung và chưa có chủ đề
+Phụ huynh: kể tiếp đi
 ```
 LLM trả về các câu có thẻ:
 ```
-[EMO:calm|0.5] Ừ, mình nghe rồi. [EMO:empathy|0.5] Nhưng nếu có điều gì làm bạn bận lòng thì cứ chia sẻ với mình nhé.
+[TOPIC:con mèo] [EMO:excited|0.7] Bé ơi, meo meo! [EMO:happy|0.7] Mèo con có cái đuôi dài thật dài.
 ```
 - Câu được tách ngay trong lúc LLM đang trả lời: mỗi câu hoàn chỉnh được gửi sang TTS luôn. Nhãn lạ thành `neutral`, cường độ kẹp trong 0–1.
-- System prompt ở `src/hri/llm/prompts.py` gồm: vai trò (robot Grace), phong cách, an toàn, ý nghĩa từng trường AFFECT, ROBOT_FACE, GUIDANCE, định dạng bắt buộc và 4 ví dụ.
+- System prompt ở `src/hri/llm/prompts.py`: hai vai (nói với bé / nói với phụ huynh), an toàn cho trẻ nhỏ, cách dùng tín hiệu gián tiếp, trí nhớ, định dạng và ví dụ.
 - Thêm biểu cảm robot mới: thêm preset vào `src/hri/ui/expressions.py`, thêm nhãn vào `expression.allowed`, rồi xem bằng `hri check face`.
 
 ---
@@ -347,8 +363,8 @@ LLM trả về các câu có thẻ:
 
 | File | Nội dung |
 |---|---|
-| `~/.local/share/hri-robot/logs/session_*.jsonl` | mỗi lượt: lời người dùng, affect (kèm MSSD/PAC), quyết định micro-loop, ROBOT_FACE/GUIDANCE đã gửi, câu trả lời, độ trễ |
-| `hri test --csv file.csv` | mỗi frame: xác suất thô và đã hiệu chuẩn của 8 lớp, V/A, chiến lược, thời gian xử lý |
+| `~/.local/share/hri-robot/logs/session_*.jsonl` | `turn` (lời phụ huynh, trạng thái bé, câu trả lời, độ trễ), `reaction` (phản ứng theo chủ đề), `soothe` (can thiệp) |
+| `hri test --csv file.csv` | mỗi frame: nhãn thô, EMA, hiệu chuẩn, ổn định, nhóm, xác suất 8 lớp, thời gian xử lý |
 | `~/.local/share/hri-robot/snapshots/` | ảnh chụp bằng phím `s` trong `hri test` |
 
 ---
@@ -363,6 +379,8 @@ LLM trả về các câu có thẻ:
 | Vẫn không vẽ được lên LCD | Dự phòng: `sudo apt install cage` rồi `cage -- .venv/bin/hri run` |
 | `PortAudioError: Device unavailable [-9985]` | Loa HDMI chỉ cho một chương trình mở. Bản cũ để pygame chiếm loa (đã sửa: không khởi tạo `pygame.mixer`). Nếu còn gặp: `sudo fuser -v /dev/snd/*` để xem ai đang giữ, rồi `hri check speaker` |
 | `Microphone unavailable` / robot không nghe | `arecord -l` không thấy thiết bị nào: màn hình HDMI không có mic, cần cắm mic USB |
+| Vẫn mất chữ cuối câu cuối cùng (Bluetooth, HDMI) | Tăng im lặng trước khi đóng loa: `hri run --set audio.tts.tail_sec=0.9` |
+| Vẫn mất từ đầu | Đợi chấm xanh trên mặt robot rồi mới nói. Ghi lại để kiểm tra: `hri check asr --seconds 30 --save asr_debug`, nghe file WAV; tăng `audio.vad.pre_roll_sec` nếu từ đầu không có trong file |
 | Muốn phát ra loa khác loa mặc định | Xem danh sách bằng `hri check mic`, rồi đặt `audio.output_device` (một phần tên hoặc số thứ tự) |
 | Windows: `DLL load failed ... filename or extension is too long` | Chuyển repo sang đường dẫn ngắn, ví dụ `C:\dev\hri-robot` |
 | Không cài được `piper_phonemize` | Cài với `-f https://k2-fsa.github.io/icefall/piper_phonemize.html` |
@@ -371,14 +389,14 @@ LLM trả về các câu có thẻ:
 | LLM báo `404` | Tên model đã ngừng phục vụ; xem `hri check llm --list-models` rồi đổi `llm.providers[].model` |
 | Groq báo `403 Access denied` | Groq chặn theo vùng / mạng, không phải lỗi code; dùng Gemini hoặc OpenRouter |
 | Chạy `hri chat` từ Git Bash / script, robot không bao giờ thấy mặt | Lỗi Windows với stdin dạng pipe (đã xử lý: chế độ chat chờ process vision sẵn sàng rồi mới đọc bàn phím) |
-| Robot phản ứng sai cảm xúc ngay từ đầu | Lúc đo baseline 3 s bạn không giữ mặt tĩnh; bấm `c` để đo lại |
+| Robot phản ứng sai cảm xúc ngay từ đầu | Baseline học nhầm; bấm `c` để học lại lúc bé bình thường |
 
 ---
 
 ## 13. Phát triển
 
 ```bash
-pytest                     # 58 test, không cần phần cứng
+pytest                     # 90 test, không cần phần cứng
 ruff check src tests
 ```
 
@@ -390,8 +408,8 @@ src/hri/
   config.py         config nhiều lớp + --set
   models/           tải / kiểm tra sha256 / giải nén .ferpack và tarball
   camera/           picamera2 | OpenCV | file (video / thư mục ảnh)
-  vision/           YuNet, FER ONNX (fer.py), EMA + baseline (postproc.py), process vision (worker.py)
-  affect/           affect summary + ES (aggregator.py), sentiment văn bản, risk
+  vision/           YuNet, face_tracker.py (mặt vùng giữa), FER ONNX, postproc.py, pipeline.py, process vision
+  affect/           child_state.py (frame queue, 4 nhóm, thích/không thích), risk.py
   audio/            VAD + ASR, TTS (Piper + piper_phonemize)
   llm/              client có fallback, prompts, parser [EMO]
   dialogue/         app.py (điều phối, vòng đời phiên), memory.py, micro_loop.py

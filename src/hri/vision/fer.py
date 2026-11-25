@@ -4,8 +4,7 @@ Preprocessing is read from fer.json and reproduces the training/eval transform e
 (same code path as fer_resnet_demo / fer-edge):
     face crop (RGB) -> [gray] -> [BOX downsample to train_res] -> RGB -> BILINEAR to img_size
     -> /255 -> (x - mean) / std -> NCHW float32
-The model only outputs class logits; valence/arousal are derived from the class probabilities
-with a circumplex lookup (va_from_probs).
+The model only outputs class logits.
 """
 from __future__ import annotations
 
@@ -16,29 +15,6 @@ import numpy as np
 from PIL import Image
 
 FERPLUS_CLASSES = ["neutral", "happiness", "surprise", "sadness", "anger", "disgust", "fear", "contempt"]
-
-# Approximate Russell circumplex coordinates (valence, arousal) per FERPlus class.
-# Aliases cover RAF-DB / short names so any 7-8 class model maps correctly.
-CIRCUMPLEX = {
-    "neutral": (0.0, 0.0),
-    "happiness": (0.8, 0.5), "happy": (0.8, 0.5),
-    "surprise": (0.2, 0.8), "surprised": (0.2, 0.8),
-    "sadness": (-0.7, -0.4), "sad": (-0.7, -0.4),
-    "anger": (-0.6, 0.8), "angry": (-0.6, 0.8),
-    "disgust": (-0.7, 0.3),
-    "fear": (-0.6, 0.7),
-    "contempt": (-0.5, 0.2),
-}
-
-
-def va_table(labels: list[str]) -> np.ndarray:
-    return np.array([CIRCUMPLEX.get(lbl, (0.0, 0.0)) for lbl in labels], np.float32)
-
-
-def va_from_probs(probs: np.ndarray, table: np.ndarray) -> tuple[float, float]:
-    v, a = np.asarray(probs, np.float32) @ table
-    return float(v), float(a)
-
 
 def softmax(z: np.ndarray) -> np.ndarray:
     z = np.asarray(z, dtype=np.float64)

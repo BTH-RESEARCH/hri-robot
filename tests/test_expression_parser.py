@@ -38,3 +38,30 @@ def test_no_tag_and_markdown_cleanup():
     segs = parse_full("**Chào** bạn 😊 [ghi chú] nhé", ALLOWED)
     assert segs[0].emotion == "neutral"
     assert segs[0].text == "Chào bạn ghi chú nhé"
+
+
+def test_topic_tag_is_captured_not_spoken_even_char_by_char():
+    p = ExpressionStreamParser(ALLOWED)
+    segs = []
+    for ch in "[TOPIC: Con Mèo] [EMO:happy|0.8] Meo meo! [EMO:curious|0.5] Mèo đâu rồi?":
+        segs += p.feed(ch)
+    segs += p.flush()
+    assert p.topic == "con mèo" and [s.text for s in segs] == ["Meo meo!", "Mèo đâu rồi?"]
+
+
+def test_long_sentence_is_not_cut_at_its_commas():
+    p = ExpressionStreamParser(ALLOWED)
+    text = ("Bạn mèo vươn vai một cái thật dài, cái đuôi xinh xinh cứ vẫy qua vẫy lại, như đang vẫy chào bé, "
+            "rồi khẽ kêu meo một tiếng.")
+    segs = []
+    for ch in text:
+        segs += p.feed(ch)
+    assert [s.text for s in segs + p.flush()] == [text]
+
+
+def test_ellipsis_inside_a_sentence_char_by_char():
+    p = ExpressionStreamParser(ALLOWED)
+    segs = []
+    for ch in "[EMO:happy|0.8] Sư tử kêu ò... o... một tiếng ấm áp. [EMO:sad|0.5] Rồi... Nó ngủ, nặng 3.5 cân!":
+        segs += p.feed(ch)
+    assert [s.text for s in segs + p.flush()] == ["Sư tử kêu ò... o... một tiếng ấm áp.", "Rồi...", "Nó ngủ, nặng 3.5 cân!"]

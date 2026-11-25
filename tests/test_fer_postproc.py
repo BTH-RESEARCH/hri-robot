@@ -1,18 +1,14 @@
 import zipfile
 from itertools import pairwise
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from PIL import Image
 
-from hri.dialogue.micro_loop import ATTENTIVE, DEESCALATION, MIRRORING, SUPPORT, decide
 from hri.models.registry import _safe_extract
-from hri.vision.fer import FERPLUS_CLASSES, preprocess_rgb, square_crop, va_from_probs, va_table
+from hri.vision.fer import FERPLUS_CLASSES, preprocess_rgb, square_crop
 from hri.vision.postproc import (
     BaselineCalibrator,
-    EMASmoother,
-    FERStream,
     HysteresisSegmenter,
     SensitivityScaler,
 )
@@ -20,8 +16,6 @@ from hri.vision.postproc import (
 L = FERPLUS_CLASSES  # neutral, happiness, surprise, sadness, anger, disgust, fear, contempt
 META = {"img_size": 224, "grayscale": True, "train_res": 48,
         "mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225]}
-MICRO = {"min_frames": 3, "positive_valence": 0.2, "negative_valence": -0.2, "high_arousal": 0.5,
-         "min_intensity": 0.3, "max_intensity": 0.8}
 
 
 def onehot(name, p=0.9):
@@ -50,14 +44,6 @@ def test_square_crop_like_fer_demo():
     assert square_crop(img, (600, 450, 100, 100), 0.15).shape[:2] == (480 - 435, 640 - 585)  # clipped
 
 
-def test_valence_arousal_from_probs():
-    tab = va_table(L)
-    v, a = va_from_probs(onehot("happiness", 1.0), tab)
-    assert (v, a) == pytest.approx((0.8, 0.5))
-    v, _ = va_from_probs(onehot("sadness", 1.0), tab)
-    assert v < -0.5
-
-
 # ---------------------------------------------------------------- post-processing (fer_demo v2 / V3b)
 def test_sensitivity_scaling():
     sc = SensitivityScaler(L, {"neutral": 0.5, "sadness": 2.0})
@@ -66,13 +52,6 @@ def test_sensitivity_scaling():
     w = np.array([0.5, 1, 1, 2.0, 1, 1, 1, 1])
     assert np.allclose(out, w / w.sum())
     assert np.allclose(SensitivityScaler(L, enabled=False)(p), p)
-
-
-def test_ema_optional():
-    s = EMASmoother(alpha=0.45)
-    a, b = onehot("neutral"), onehot("happiness")
-    s(a)
-    assert np.allclose(s(b), 0.45 * b + 0.55 * a)
 
 
 def test_baseline_sanity_clamp_and_dynamic_gain():
@@ -140,58 +119,6 @@ def test_hysteresis_fade_grace_ignores_one_frame_drop():
     drop = onehot("neutral", 0.5)                       # happiness below its end threshold for 1 frame
     assert seg.update(1.0, drop) == "happiness"          # within fade_grace_s = 0.2 s
     assert seg.update(1.05, onehot("happiness", 0.8)) == "happiness"
-
-
-def test_fer_stream_stable_label_and_va():
-    st = FERStream(L, {"target_fps": 15, "baseline": {"enabled": False}})
-    t = 0.0
-    for _ in range(10):
-        f = st.update({"type": "fer", "t": t, "probs": onehot("happiness", 0.9).tolist(), "quality": 1.0})
-        t += 1 / 15
-    assert f.label == "happiness" and f.top == "happiness" and f.valence > 0.5
-    assert f.to_msg(L)["label"] == "happiness"
-
-
-def test_fer_stream_calibrates_on_face_time_only():
-    st = FERStream(L, {"baseline": {"calib_seconds": 1.0, "min_samples": 3}})
-    st.start_calibration()
-    t = 100.0
-    for _ in range(5):
-        t += 0.2
-        st.update({"type": "fer", "t": t, "probs": onehot("neutral").tolist(), "quality": 0.9})
-    assert st.calibrating                         # 0.8 s of face time so far
-    st.update({"type": "no_face", "t": t + 5})    # a gap must not count
-    for _ in range(6):
-        t += 0.2
-        f = st.update({"type": "fer", "t": t + 5, "probs": onehot("neutral").tolist(), "quality": 0.9})
-    assert not st.calibrating and f.calibrated
-
-
-# ---------------------------------------------------------------- micro-loop strategies
-def frames(name, n=8, p=0.9):
-    tab = va_table(L)
-    pr = onehot(name, p)
-    v, a = va_from_probs(pr, tab)
-    return [SimpleNamespace(probs=pr, valence=v, arousal=a, quality=0.8) for _ in range(n)]
-
-
-@pytest.mark.parametrize("user, strategy, expr", [
-    ("happiness", MIRRORING, "happy"),
-    # pure surprise: V ~0.15 (< 0.2), A ~0.72 -> paper's high-arousal rule wins (tunable: micro_loop.*)
-    ("surprise", DEESCALATION, "calm"),
-    ("sadness", SUPPORT, "empathy"),
-    ("anger", DEESCALATION, "calm"),          # high arousal, negative
-    ("fear", DEESCALATION, "calm"),
-    ("neutral", ATTENTIVE, "listening"),
-])
-def test_micro_loop_strategy(user, strategy, expr):
-    d = decide(frames(user), L, MICRO)
-    assert (d.strategy, d.expression) == (strategy, expr)
-    assert 0.3 <= d.intensity <= 0.8
-
-
-def test_micro_loop_needs_enough_frames():
-    assert decide(frames("happiness", n=2), L, MICRO) is None
 
 
 # ---------------------------------------------------------------- .ferpack extraction

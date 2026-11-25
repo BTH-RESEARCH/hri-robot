@@ -122,13 +122,25 @@ def test_truncated_reply_is_retried_and_never_spoken(app):
     FakeLLM.script = [("[EMO:cal", None), ("[EMO:calm|0.6] Mình nghe đây.", "stop")]
     now = time.time()
     app._handle(Utterance("ổn", now - 1, now))
-    segs = [s for s in list(app.say_q.queue) if s is not None]
+    segs = [s for s in list(app.say_q.queue) if hasattr(s, "text")]
     assert [s.text for s in segs] == ["Mình nghe đây."]
     app._drain(app.say_q)
     # cut off after one full sentence: keep the sentence, drop the half one
-    FakeLLM.script = [("[EMO:calm|0.6] Câu đủ. Mình thấy nét", None)]
+    FakeLLM.script = [("[EMO:calm|0.6] Câu đủ. Mình thấy nét", None), *[("", None)] * 3]
     say(app, "rồi sao")
-    assert app.memory.turns[-1][1] == "[EMO:calm|0.6] Câu đủ."
+    assert app.memory.turns[-1][1] == "[TOPIC:khác] [EMO:calm|0.6] Câu đủ."
+    assert len(app.llm.calls) == 2 + 4                  # bounded
+
+
+def test_dropped_stream_is_continued_after_what_was_said(app):
+    app._start_session()
+    FakeLLM.script = [("[TOPIC:con mèo] [EMO:happy|0.6] Câu một. [EMO:calm|0.6] Chú mè", None),
+                      ("[TOPIC:khác hẳn] [EMO:calm|0.6] Câu hai. [EMO:ca", None), ("[EMO:calm|0.5] Câu ba.", "stop")]
+    say(app, "kể về con mèo")
+    assert app.memory.turns[-1][1] == ("[TOPIC:con mèo] [EMO:happy|0.6] Câu một. [EMO:calm|0.6] Câu hai. "
+                                       "[EMO:calm|0.5] Câu ba.")
+    assert app.llm.calls[-1][-2] == {"role": "assistant", "content":
+                                     "[TOPIC:con mèo] [EMO:happy|0.6] Câu một. [EMO:calm|0.6] Câu hai."}
 
 
 def test_session_ends_only_without_face_and_speech(app):
@@ -171,19 +183,105 @@ def test_farewell_ends_after_speaking_and_does_not_regreet(app):
     assert not app.wait_absence
 
 
-def test_greeting_gives_up_when_person_leaves(app):
-    app.vision = FakeVision()
-    app._start_session()
-    app.last_face = time.time() - 10
-    app._greet()
-    assert not app.active and app.say_q.empty() and not app.fer_stream.calibrating
-
-
 def test_guidance_survives_failed_turn(app):
     app._start_session()
     say(app, "mình muốn chết")
-    FakeLLM.script = [("[EMO:c", None), ("[EMO:c", None)]
+    FakeLLM.script = [("[EMO:c", None)] * 4
     say(app, "mình sợ")
     assert app.memory.guidance
     say(app, "bạn còn đó không")
     assert "GUIDANCE" in app.llm.calls[-1][-1]["content"] and app.memory.guidance is None
+
+
+# ---------------------------------------------------------------- child in the loop
+def test_reaction_reaches_next_prompt(app):
+    app.fake_emotion = "happiness"
+    app._start_session()
+    FakeLLM.script = [("[TOPIC:con mèo] [EMO:happy|0.5] Meo meo.", "stop")]
+    now = time.time()
+    app._handle(Utterance("kể về con mèo", now - 1, now))
+    assert list(app.say_q.queue)[-1].topic == "con mèo"
+    app._observe("con mèo", now, now + 1, app.memory.session)
+    app._drain(app.say_q)
+    say(app, "kể tiếp")
+    msg = app.llm.calls[-1][-1]["content"]
+    assert "LIKES: con mèo" in msg and "enjoy_curious" in msg
+    app._end_session()
+    app._start_session()
+    say(app, "chào")
+    assert "con mèo" not in str(app.llm.calls[-1][1:])
+
+
+def test_talking_to_parent_is_not_content(app):
+    app._start_session()
+    FakeLLM.script = [("[TOPIC:phụ huynh] [EMO:calm|0.5] Dạ.", "stop")]
+    now = time.time()
+    app._handle(Utterance("dạy con thế nào", now - 1, now))
+    assert list(app.say_q.queue)[-1].topic is None
+
+
+def test_soothe_interrupts_reply_and_tells_parent(app):
+    app._start_session()
+
+    class Slow(FakeLLM):
+        def stream(self, messages, info=None):
+            yield "[TOPIC:sư tử] [EMO:excited|0.8] Gầm! "
+            app._soothe()
+            yield "[EMO:excited|0.8] Gầm nữa! "
+            info["finish"] = "stop"
+    app.llm = Slow(None)
+    now = time.time()
+    app._handle(Utterance("kể sư tử", now - 1, now))
+    texts = [getattr(s, "text", "<end>") for s in list(app.say_q.queue)]
+    assert texts == [app.cfg.get("child.distress.soothe"), app.cfg.get("child.distress.tell_parent"), "<end>"]
+    app._drain(app.say_q)
+    app.llm = FakeLLM(None)
+    say(app, "kể cái khác")                              # the next command works and knows what happened
+    assert "GUIDANCE" in app.llm.calls[-1][-1]["content"]
+
+
+def test_log_has_no_memory_text(app):
+    app._start_session()
+    say(app, "kể chuyện")
+    rec = __import__("json").loads(app.turn_log.read_text(encoding="utf-8").splitlines()[-1])
+    assert rec["event"] == "turn" and "summary_chars" in rec["memory"] and "child" in rec
+
+
+def test_distress_counts_against_topic_only_while_speaking(app):
+    app._start_session()
+    app._topic, app.state = "sư tử", "idle"
+    app._soothe()
+    assert app.content.items == []
+    app.state = "speaking"
+    app._soothe()
+    assert [i["topic"] for i in app.content.items] == ["sư tử"]
+
+
+# ---------------------------------------------------------------- vague commands
+@pytest.mark.parametrize("text, topic, vague", [
+    ("chào đi", "", True), ("Nói gì đi.", "", True), ("kể chuyện", "", True), ("kể chuyện cho bé nghe đi Grace", "khác", True),
+    ("chào bé đi Grace", "", True), ("kể tiếp đi", "", True), ("kể tiếp đi", "con mèo", False), ("kể chuyện con mèo", "", False),
+    ("ừ kể đi", "", False), ("bé nghe gì", "", False), ("tạm biệt nhé", "", False), ("bé hay khóc đêm", "", False),
+])
+def test_vague_command(text, topic, vague):
+    from hri.llm.prompts import guidance_vague
+    assert (guidance_vague(text, topic) is not None) is vague
+
+
+def test_vague_hint_once_per_session(app):
+    app._start_session()
+    FakeLLM.script = [("[TOPIC:chào hỏi] [EMO:happy|0.5] Chào bé.", "stop")]
+    say(app, "chào đi")
+    assert "GUIDANCE: Phụ huynh chưa nêu chủ đề" in app.llm.calls[-1][-1]["content"]
+    say(app, "kể chuyện đi")                       # still vague: now the LLM chooses, no endless asking
+    assert "GUIDANCE" not in app.llm.calls[-1][-1]["content"]
+    app._end_session()
+    app._start_session()
+    say(app, "kể chuyện đi")
+    assert "GUIDANCE" in app.llm.calls[-1][-1]["content"]
+
+
+def test_system_prompt_formats():
+    from hri.llm.prompts import build_system_prompt
+    p = build_system_prompt(["happy", "calm"])
+    assert "happy, calm" in p and '{"visible": true' in p and "{{" not in p and "miệng" not in p.split("# Vai trò")[0]

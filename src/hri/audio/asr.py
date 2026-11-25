@@ -49,9 +49,77 @@ def build_vad(reg: ModelRegistry, vad_cfg: dict, sample_rate: int):
 
 def transcribe(recognizer, samples: np.ndarray, sample_rate: int) -> str:
     s = recognizer.create_stream()
-    s.accept_waveform(sample_rate, samples)
+    pad = np.zeros(int(0.2 * sample_rate), np.float32)   # the model misses words at the very edge
+    s.accept_waveform(sample_rate, np.concatenate([pad, samples, pad]))
     recognizer.decode_stream(s)
     return s.result.text.strip().lower()   # model outputs UPPERCASE
+
+
+class Segmenter:
+    """VAD with pre-roll: silero marks the onset late for soft consonants, so every utterance also gets the
+    `pre_roll` seconds before it (never audio of the previous utterance, never audio from while the robot spoke)."""
+
+    KEEP_SEC = 25
+
+    def __init__(self, vad, sr: int, pre_roll: float = 0.4, guard: float = 0.15, window: int = 512):
+        self.vad, self.sr, self.window = vad, sr, window
+        self.pre, self.guard = int(pre_roll * sr), int(guard * sr)
+        self._restart()
+        self._skip = 0
+
+    def _restart(self) -> None:
+        self.vad.reset()                          # segment positions count from here
+        self.buf = np.zeros(0, np.float32)
+        self.hist = np.zeros(0, np.float32)
+        self.base = 0                             # position of hist[0]
+        self.prev_end = 0
+        self.in_speech = False
+
+    def feed(self, chunk: np.ndarray, muted: bool) -> list[tuple[str, np.ndarray | None]]:
+        if muted:                                 # the robot's turn: do not transcribe it
+            if self._skip == 0 or len(self.hist) or len(self.buf):
+                self._restart()
+            self._skip = self.guard               # room echo right after the turn
+            return []
+        if self._skip > 0:
+            n = min(self._skip, len(chunk))
+            self._skip -= n
+            chunk = chunk[n:]
+        out: list[tuple[str, np.ndarray | None]] = []
+        self.buf = np.concatenate([self.buf, chunk])
+        while len(self.buf) >= self.window:
+            w, self.buf = self.buf[: self.window], self.buf[self.window:]
+            self.hist = np.concatenate([self.hist, w])
+            extra = len(self.hist) - self.KEEP_SEC * self.sr
+            if extra > 0:
+                self.hist, self.base = self.hist[extra:], self.base + extra
+            self.vad.accept_waveform(w)
+            if self.vad.is_speech_detected() and not self.in_speech:
+                self.in_speech = True
+                out.append(("start", None))
+            while not self.vad.empty():
+                start, body = int(self.vad.front.start), np.array(self.vad.front.samples, np.float32)
+                self.vad.pop()
+                a = max(start - self.pre, self.prev_end, self.base)
+                pre = self.hist[a - self.base: max(a, start) - self.base]
+                self.prev_end = start + len(body)
+                self.in_speech = False
+                out.append(("end", np.concatenate([pre, body])))
+        return out
+
+
+def save_wav(folder, samples: np.ndarray, sr: int, text: str) -> None:
+    import wave
+    from pathlib import Path
+    p = Path(folder)
+    p.mkdir(parents=True, exist_ok=True)
+    f = p / f"{time.strftime('%H%M%S')}_{int(time.time() * 1000) % 1000:03d}.wav"
+    with wave.open(str(f), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes((np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes())
+    log.info("saved %s  (%s)", f, text)
 
 
 class ASRWorker(threading.Thread):
@@ -71,6 +139,9 @@ class ASRWorker(threading.Thread):
         self.recognizer = build_recognizer(reg, acfg["asr"])
         self.vad = build_vad(reg, acfg["vad"], self.sr)
         self.out_q = out_q
+        v = acfg["vad"]
+        self.pre_roll, self.guard = float(v.get("pre_roll_sec", 0.4)), float(v.get("guard_sec", 0.15))
+        self.save_dir = None          # hri check asr --save DIR
         self.on_start, self.on_end = on_speech_start, on_speech_end
         self.is_muted = is_muted or (lambda: False)
         self._quit = threading.Event()
@@ -92,8 +163,7 @@ class ASRWorker(threading.Thread):
                       "  Check that a mic is listed by:  arecord -l    then restart (hri check mic)", e)
 
     def _listen(self):
-        buf = np.zeros(0, np.float32)
-        in_speech, speech_t0 = False, 0.0
+        seg = Segmenter(self.vad, self.sr, self.pre_roll, self.guard, self.WINDOW)
         with sd.InputStream(samplerate=self.sr, channels=1, dtype="float32", blocksize=self.WINDOW,
                             device=self.device, callback=self._callback):
             log.info("ASR listening (sr=%d)", self.sr)
@@ -102,29 +172,19 @@ class ASRWorker(threading.Thread):
                     chunk = self._audio_q.get(timeout=0.1)
                 except queue.Empty:
                     continue
-                if self.is_muted():          # robot is speaking and barge-in disabled
-                    buf = np.zeros(0, np.float32)
-                    self.vad.reset()
-                    in_speech = False
-                    continue
-                buf = np.concatenate([buf, chunk])
-                while len(buf) >= self.WINDOW:
-                    self.vad.accept_waveform(buf[: self.WINDOW])
-                    buf = buf[self.WINDOW:]
-                    if self.vad.is_speech_detected() and not in_speech:
-                        in_speech, speech_t0 = True, time.time()
+                for event, samples in seg.feed(chunk, self.is_muted()):
+                    if event == "start":
                         if self.on_start:
-                            self.on_start(speech_t0)
-                while not self.vad.empty():
-                    seg = np.array(self.vad.front.samples, dtype=np.float32)
-                    self.vad.pop()
+                            self.on_start(time.time())
+                        continue
                     t_end = time.time()
-                    t_start = t_end - len(seg) / self.sr
-                    in_speech = False
+                    t_start = t_end - len(samples) / self.sr
                     if self.on_end:
                         self.on_end(t_start, t_end)
                     t0 = time.perf_counter()
-                    text = transcribe(self.recognizer, seg, self.sr)
+                    text = transcribe(self.recognizer, samples, self.sr)
                     log.info("ASR (%.0f ms): %s", (time.perf_counter() - t0) * 1000, text)
+                    if self.save_dir:
+                        save_wav(self.save_dir, samples, self.sr, text)
                     if text:
                         self.out_q.put(Utterance(text, t_start, t_end))

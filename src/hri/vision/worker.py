@@ -1,7 +1,7 @@
 """Vision runs in its own PROCESS so FER never blocks audio / UI (important on Pi5's 4 cores).
 
-The process only does camera -> YuNet -> square crop -> ResNet-18 and sends RAW class probabilities.
-Temporal post-processing (EMA + personal baseline) runs in the main process (vision/postproc.py),
+The process only does camera -> YuNet -> child's face in the central zone -> ResNet-18 and sends RAW class probabilities.
+Temporal post-processing runs in the main process (vision/postproc.py),
 so it can be reset / re-calibrated by the dialogue logic.
 """
 from __future__ import annotations
@@ -21,18 +21,12 @@ def vision_loop(cfg_data: dict, profile: str, root: str, out_q: mp.Queue, stop: 
     from hri.camera import create_camera
     from hri.config import Config
     from hri.models import ModelRegistry
-    from hri.vision.face_detector import FaceDetector
-    from hri.vision.fer import FERModel, face_quality, square_crop
+    from hri.vision.pipeline import ChildFER
 
     cfg = Config(cfg_data, profile, Path(root))
-    reg = ModelRegistry(cfg)
-    vcfg = cfg.section("vision")
-    det_cfg = vcfg["face_detector"]
-    detector = FaceDetector(reg.require(det_cfg["model"]), det_cfg["score_threshold"], det_cfg["min_face_size"])
-    fer = FERModel(reg.require(vcfg["fer"]["model"]), int(vcfg["fer"].get("num_threads", 2)))
-    margin = float(det_cfg.get("margin", 0.15))
-    period = 1.0 / float(vcfg.get("target_fps", 10))
-    _put_latest(out_q, {"type": "ready", "t": time.time(), "labels": fer.labels, "model": fer.name})
+    fer = ChildFER(cfg, ModelRegistry(cfg))
+    period = 1.0 / float(cfg.get("vision.target_fps", 10))
+    _put_latest(out_q, {"type": "ready", "t": time.time(), "labels": fer.labels, "model": fer.model.name})
 
     with create_camera(cfg.section("camera")) as cam:
         while not stop.is_set():
@@ -41,20 +35,9 @@ def vision_loop(cfg_data: dict, profile: str, root: str, out_q: mp.Queue, stop: 
             if frame is None:
                 time.sleep(0.01)
                 continue
-            faces = detector.detect(frame)
-            crop = square_crop(frame, faces[0].box, margin) if faces else None
-            if crop is not None and crop.size:
-                f = faces[0]
-                t1 = time.perf_counter()
-                probs = fer.predict_bgr(crop)
-                _put_latest(out_q, {
-                    "type": "fer", "t": t0, "probs": probs.tolist(),
-                    "quality": face_quality(crop, f.score, frame.shape[0]), "det_score": f.score,
-                    "box": f.box, "frame_size": frame.shape[1::-1],
-                    "infer_ms": (time.perf_counter() - t1) * 1000, "loop_ms": (time.time() - t0) * 1000,
-                })
-            else:
-                _put_latest(out_q, {"type": "no_face", "t": t0})
+            msg, _, _ = fer.process(frame, t0)
+            msg["loop_ms"] = (time.time() - t0) * 1000
+            _put_latest(out_q, msg)
             time.sleep(max(0.0, period - (time.time() - t0)))
 
 

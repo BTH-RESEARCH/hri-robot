@@ -7,7 +7,7 @@ ablation variant V3b = everything except pedagogy):
                                        dynamic neutral suppression
       -> 3. Hysteresis + 2 biomechanical rules: per-class thresholds, t_min,     (fer_demo/temporal.py)
                                        dwell, neutral bridging, transition barriers
-    => stable label (hysteresis) + calibrated probabilities -> valence / arousal (circumplex)
+    => stable label (hysteresis) + calibrated probabilities
 
 Like the demo, EMA is NOT part of the chain any more (vision.smoothing.enabled: false); it can be switched
 back on for ablation. Where the demo's README / EmotionPostProcessor disagree with runners.py, runners.py wins
@@ -19,8 +19,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-
-from hri.vision.fer import va_from_probs, va_table
 
 # ----------------------------------------------------------------------------- 1. sensitivity scaling
 DEFAULT_SENSITIVITY = {"neutral": 0.45, "happiness": 0.95, "surprise": 1.15, "sadness": 1.85,
@@ -318,17 +316,10 @@ class AffectFrame:
     label: str                 # stable label (hysteresis + biomechanical rules)
     top: str                   # argmax of the calibrated probabilities (before hysteresis)
     confidence: float          # calibrated probability of the stable label
-    valence: float             # from the calibrated probabilities
-    arousal: float
     quality: float
     calibrated: bool
     buffer: bool = False       # neutral rest between two expressions
-
-    def to_msg(self, labels: list[str]) -> dict:
-        """Dict format consumed by AffectAggregator.add()."""
-        return {"t": self.t, "probs": self.probs.tolist(), "labels": labels, "label": self.label,
-                "valence": self.valence, "arousal": self.arousal, "confidence": self.confidence,
-                "quality": self.quality}
+    ema: str = ""              # argmax of an EMA over the raw softmax: comparator, never in the chain
 
 
 class EMASmoother:
@@ -370,7 +361,8 @@ class FERStream:
         self.reset_after = int(sm.get("reset_after", 10))
         # the demo adds one frame period for every calibration frame, including the first one
         self.nominal_dt = 1.0 / float(vision_cfg.get("target_fps", 10) or 10)
-        self._va = va_table(self.classes)
+        self._comparator = EMASmoother(sm.get("alpha", 0.45))
+        self.track: int | None = None
         self._last_t: float | None = None
         self._missing = 0
         self.face_seen = False
@@ -381,21 +373,24 @@ class FERStream:
         self.segmenter.reset()
         self.calibrating = self.calibrator.enabled
 
-    def cancel_calibration(self) -> None:
-        """Person left / took too long: go on uncalibrated instead of waiting forever."""
-        self.calibrating = False
-
     def update(self, msg: dict) -> AffectFrame | None:
         if msg.get("type") != "fer":
             self._last_t = None
             self._missing += 1
             if self._missing > self.reset_after:     # person left: next one starts a fresh state
                 self.segmenter.reset()
+                self._comparator.reset()
                 if self.smoother:
                     self.smoother.reset()
             return None
         self._missing = 0
         self.face_seen = True
+        if msg.get("track", self.track) != self.track:      # another face took over: its own baseline
+            if self.track is not None:
+                self._last_t = None
+                self._comparator.reset()
+                self.start_calibration()
+            self.track = msg["track"]
         t = float(msg["t"])
         # face time: one nominal period for the first frame after a gap, gaps themselves don't count
         dt = self.nominal_dt if self._last_t is None else min(0.5, t - self._last_t)
@@ -408,7 +403,7 @@ class FERStream:
             self.calibrating = False
         probs = self.calibrator.adjust(p)
         label = self.segmenter.update(t, probs)                             # 3. hysteresis + biomechanics
-        v, a = va_from_probs(probs, self._va)
+        ema = self.classes[int(np.argmax(self._comparator(raw)))]
         return AffectFrame(t, raw, probs, label, self.classes[int(np.argmax(probs))],
-                           float(probs[self.classes.index(label)]), v, a, float(msg.get("quality", 1.0)),
-                           self.calibrator.is_calibrated, self.segmenter.is_buffer(t))
+                           float(probs[self.classes.index(label)]), float(msg.get("quality", 1.0)),
+                           self.calibrator.is_calibrated, self.segmenter.is_buffer(t), ema)

@@ -1,14 +1,16 @@
-"""Intervention logic: local, rule-based, runs BEFORE the LLM (no network dependency)."""
+"""Intervention logic: local rules that run before / instead of the LLM (no network dependency)."""
 from __future__ import annotations
 
+from hri.affect.child_state import CONFUSED, DISLIKE, ChildQueue
 
-def assess_risk(text: str, affect: dict, safety_cfg: dict) -> str:
-    if not safety_cfg.get("enabled", True):
-        return "low"
+
+def adult_crisis(text: str, safety_cfg: dict) -> bool:
+    """The speaking parent mentions self-harm (keyword rule)."""
     t = text.lower()
-    if any(k in t for k in safety_cfg.get("keywords", [])):
-        return "high"
-    if affect.get("face_visible") and affect.get("valence", 0) < safety_cfg.get("negative_valence_threshold", -0.6) \
-            and (affect.get("stability") or 0) > 0.6:   # stability is None when ES cannot be computed
-        return "elevated"
-    return "low"
+    return bool(safety_cfg.get("enabled", True)) and any(k in t for k in safety_cfg.get("keywords", []))
+
+
+def child_distress(queue: ChildQueue, now: float, cfg: dict) -> bool:
+    """The child's face looked upset (sad / afraid / angry / disgusted) for several seconds."""
+    return bool(cfg.get("enabled", True)) and queue.sustained({CONFUSED, DISLIKE}, now, float(cfg.get("seconds", 4.0)),
+                                                              float(cfg.get("ratio", 0.8)))

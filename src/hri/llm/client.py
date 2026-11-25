@@ -44,10 +44,12 @@ class LLMClient:
 
     def stream(self, messages: list[dict], info: dict | None = None) -> Iterator[str]:
         """Yield text deltas. Falls back to the next provider only if nothing was yielded yet.
-        info["finish"] = the server's finish_reason; None means the stream was cut off."""
+        info["finish"] = the server's finish_reason; None means the stream was cut off.
+        info["first_provider"] (optional): start with another provider (rotates)."""
         info = {} if info is None else info
         errors: list[str] = []
-        for name, model, client, extra in self.providers:
+        k = info.get("first_provider", 0) % len(self.providers)
+        for name, model, client, extra in self.providers[k:] + self.providers[:k]:
             t0 = time.perf_counter()
             first, info["finish"] = True, None
             try:

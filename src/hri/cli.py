@@ -114,58 +114,40 @@ def cmd_check(cfg: Config, args) -> int:
         return 0 if r["agree_pct"] >= 99.0 else 1
 
     elif what == "vision":
-        # live: camera -> YuNet -> FER -> EMA + baseline -> micro-loop decision (no robot face)
-        from hri.affect.aggregator import AffectAggregator
+        # live text output: camera -> central face -> FER -> post-processing -> 4 groups -> micro-loop
+        from hri.affect.child_state import ChildQueue
         from hri.camera import create_camera
         from hri.dialogue.micro_loop import decide
-        from hri.vision.face_detector import FaceDetector
-        from hri.vision.fer import FERModel, face_quality, square_crop
+        from hri.vision.pipeline import ChildFER
         from hri.vision.postproc import FERStream
-        v = cfg.section("vision")
-        dcfg = v["face_detector"]
-        det = FaceDetector(reg.require(dcfg["model"]), dcfg["score_threshold"], dcfg["min_face_size"])
-        fer = FERModel(reg.require(v["fer"]["model"]), int(v["fer"].get("num_threads", 2)))
-        stream = FERStream(fer.labels, v)
-        agg = AffectAggregator(cfg.section("affect"), fer.labels)
+        fer = ChildFER(cfg, reg)
+        stream, child = FERStream(fer.labels, cfg.section("vision")), ChildQueue(fer.labels, cfg.section("child"))
         mcfg = cfg.section("micro_loop")
         if not args.no_calib:
             stream.start_calibration()
-            print(f"Look at the camera with a resting face for {stream.calibrator.calib_seconds:.0f}s ...")
-        n, t_start, last_decision = 0, time.time(), 0.0
+        n, t_start, last = 0, time.time(), 0.0
         with create_camera(cfg.section("camera")) as cam:
             while time.time() - t_start < args.seconds:
                 frame = cam.read()
                 if frame is None:
                     continue
-                t0 = time.perf_counter()
-                faces = det.detect(frame)
-                crop = square_crop(frame, faces[0].box, float(dcfg.get("margin", 0.15))) if faces else None
-                if crop is not None and crop.size:
-                    msg = {"type": "fer", "t": time.time(), "probs": fer.predict_bgr(crop),
-                           "quality": face_quality(crop, faces[0].score, frame.shape[0])}
-                else:
-                    msg = {"type": "no_face", "t": time.time()}
-                was_calibrating = stream.calibrating
-                af = stream.update(msg)
-                ms = (time.perf_counter() - t0) * 1000
-                n += 1
-                if was_calibrating and not stream.calibrating:
-                    print(f"baseline done: {stream.calibrator.info()['p_base']}")
-                if af is None:
-                    print(f"no face  {ms:5.0f} ms")
-                    continue
-                if not stream.calibrating:
-                    agg.add(af.to_msg(fer.labels))
-                raw = fer.labels[int(af.raw.argmax())]
-                print(f"raw {raw:9s} -> calib {af.top:9s} -> stable {af.label:9s} {af.confidence:.2f}  "
-                      f"V{af.valence:+.2f} A{af.arousal:+.2f} "
-                      f"q{af.quality:.2f} {'calib ' if stream.calibrating else ''}{ms:5.0f} ms")
                 now = time.time()
-                if not stream.calibrating and now - last_decision >= float(mcfg.get("update_sec", 1.0)):
-                    last_decision = now
-                    d = decide(agg.frames_between(now - float(mcfg.get("window_sec", 1.0)), now), fer.labels, mcfg)
+                msg, faces, _ = fer.process(frame, now)
+                af = stream.update(msg)
+                ms = (time.time() - now) * 1000
+                n += 1
+                if af is None:
+                    child.add_absent(now)
+                    print(f"no face in the zone ({len(faces)} in the image)  {ms:4.0f} ms")
+                else:
+                    group = child.add(af)
+                    print(f"#{msg['track']} raw {fer.labels[int(af.raw.argmax())]:9s} > {af.top:9s} > {af.label:9s} "
+                          f"{group:18s} {'' if af.calibrated else 'not calibrated'} {ms:4.0f} ms")
+                if now - last >= float(mcfg.get("update_sec", 1.0)):
+                    last = now
+                    d = decide(child.summary(now - 1.0, now), mcfg)
                     if d:
-                        print(f"  >> micro-loop: {d.strategy} -> robot '{d.expression}' {d.intensity:.2f}")
+                        print(f"  >> child {d.group} -> robot '{d.expression}' {d.intensity:.2f}")
         print(f"{n / max(1e-6, time.time() - t_start):.1f} FPS (detector + FER + post-processing)")
 
     elif what == "mic":
@@ -205,6 +187,7 @@ def cmd_check(cfg: Config, args) -> int:
         from hri.audio.asr import ASRWorker
         q: queue.Queue = queue.Queue()
         w = ASRWorker(cfg, reg, q, on_speech_start=lambda t: print("... speech"))
+        w.save_dir = args.save
         w.start()
         print(f"Speak now ({args.seconds}s)")
         t_end = time.time() + args.seconds
@@ -225,6 +208,7 @@ def cmd_check(cfg: Config, args) -> int:
         dt = time.perf_counter() - t0
         print(f"synth {dt * 1000:.0f} ms for {len(samples) / sr:.2f}s audio (RTF {dt / (len(samples) / sr):.2f})")
         sp.say(text)
+        sp.end_turn()
 
     elif what == "llm":
         from hri.llm.client import LLMClient
@@ -238,10 +222,10 @@ def cmd_check(cfg: Config, args) -> int:
                     print(f"  {m}")
             return 0
         allowed = cfg.get("expression.allowed")
+        from hri.dialogue.app import fake_child
         msgs = [{"role": "system", "content": build_system_prompt(allowed)},
                 {"role": "user", "content": build_user_message(
-                    args.text or "Hôm nay mình hơi mệt.",
-                    {"face_visible": True, "dominant": "sad", "valence": -0.4, "confidence": 0.7})}]
+                    args.text or "kể cho bé nghe về con mèo", fake_child("happiness"))}]
         t0 = time.perf_counter()
         out = cl.complete(msgs)
         print(f"raw ({(time.perf_counter() - t0) * 1000:.0f} ms): {out}")
@@ -303,10 +287,12 @@ def cmd_check(cfg: Config, args) -> int:
 
 # ---------------------------------------------------------------- run / chat
 def _play(cfg: Config, samples, sr: int) -> None:
+    import numpy as np
+
     from hri.audio.output import Output, convert
     stream, rate, ch = Output(cfg.get("audio.output_device")).open(sr)
     with stream as out:
-        out.write(convert(samples, sr, rate, ch))
+        out.write(convert(np.concatenate([samples.reshape(-1), np.zeros(sr // 2, np.float32)]), sr, rate, ch))
 
 
 def cmd_test(cfg: Config, args) -> int:
@@ -365,13 +351,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--n", type=int, default=None, help="(fer) number of test images, default all")
     s.add_argument("--no-calib", action="store_true", help="(vision) skip the baseline measurement")
     s.add_argument("--text")
+    s.add_argument("--save", help="(asr) save every recognised utterance as WAV in this folder")
     s.add_argument("--list-models", action="store_true", help="(llm) list models your API keys can use")
     s.set_defaults(func=cmd_check)
 
     s = sub.add_parser("test", help="live FER debug window: camera + face box + expression results")
     s.add_argument("--seconds", type=float, default=0.0, help="stop after N seconds (default: until q)")
-    s.add_argument("--no-calib", action="store_true", help="skip the 3 s resting-face baseline")
-    s.add_argument("--csv", help="save per-frame results (raw/calibrated probs, V/A, strategy) to a CSV")
+    s.add_argument("--no-calib", action="store_true", help="do not learn the resting-face baseline")
+    s.add_argument("--csv", help="save per-frame results (raw, EMA, stable label, group, probabilities) to a CSV")
     s.add_argument("--screenshot", help="save the last frame of the window to this PNG")
     s.set_defaults(func=cmd_test)
 
@@ -382,7 +369,7 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--no-greet", action="store_true")
         if name == "chat":
             s.add_argument("--no-tts", action="store_true")
-            s.add_argument("--fake-emotion", help="pretend FER sees this label (no camera needed)")
+            s.add_argument("--fake-emotion", help="pretend the child shows this label or group (no camera needed)")
         s.set_defaults(func=func)
     return p
 

@@ -12,3 +12,4 @@ __pycache__/
 models_cache/
 data/
 logs/
+asr_debug/
