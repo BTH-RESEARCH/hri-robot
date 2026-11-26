@@ -1,5 +1,5 @@
-"""FER post-processing, ported from fer_resnet_demo v2 (chain of `runners.py` webcam + `configs/default.yaml`,
-ablation variant V3b = everything except pedagogy):
+"""FER post-processing, ported from fer_resnet_demo, branch feat/resnet-postprocessing (chain of `runners.py` webcam + `configs/default.yaml`,
+ablation variant "biomechanics" = the full proposed chain):
 
     softmax
       -> 1. Sensitivity scaling       P'_c = w_c P_c / sum_j w_j P_j            (fer_demo/loss.py)
@@ -21,8 +21,8 @@ from dataclasses import dataclass
 import numpy as np
 
 # ----------------------------------------------------------------------------- 1. sensitivity scaling
-DEFAULT_SENSITIVITY = {"neutral": 0.45, "happiness": 0.95, "surprise": 1.15, "sadness": 1.85,
-                       "anger": 1.90, "fear": 3.00, "contempt": 3.40, "disgust": 3.60}
+DEFAULT_SENSITIVITY = {"neutral": 0.52, "happiness": 0.95, "surprise": 1.15, "sadness": 2.05,
+                       "anger": 2.05, "fear": 2.65, "contempt": 2.65, "disgust": 2.75}
 
 
 class SensitivityScaler:
@@ -43,8 +43,8 @@ class SensitivityScaler:
 
 
 # ----------------------------------------------------------------------------- 2. personal baseline
-DEFAULT_CLASS_GAINS = {"neutral": 1.0, "happiness": 1.6, "surprise": 2.0, "sadness": 3.2, "anger": 3.2,
-                       "fear": 3.4, "contempt": 3.4, "disgust": 3.6}
+DEFAULT_CLASS_GAINS = {"neutral": 1.0, "happiness": 1.6, "surprise": 2.0, "sadness": 3.3, "anger": 3.3,
+                       "fear": 3.0, "contempt": 2.9, "disgust": 3.0}
 
 
 class BaselineCalibrator:
@@ -56,7 +56,7 @@ class BaselineCalibrator:
         renormalise."""
 
     def __init__(self, classes: list[str], calib_seconds: float = 3.0, min_samples: int = 5,
-                 max_non_neutral: float = 0.15, neutral_margin: float = 0.20, delta_gain: float = 2.0,
+                 max_non_neutral: float = 0.15, neutral_margin: float = 0.16, delta_gain: float = 2.0,
                  class_gains: dict | None = None, dynamic_neutral_suppress: bool = True,
                  adaptive_momentum: float = 0.0, enabled: bool = True):
         self.classes = list(classes)
@@ -155,10 +155,10 @@ DEFAULT_TRANSITION_BARRIERS = {
                 "disgust": 0.0, "fear": 0.0, "contempt": 0.0},
 }
 DEFAULT_CLASS_THRESHOLDS = {
-    "neutral": {"start": 0.55, "end": 0.38}, "happiness": {"start": 0.38, "end": 0.22},
-    "surprise": {"start": 0.32, "end": 0.18}, "sadness": {"start": 0.24, "end": 0.12},
-    "anger": {"start": 0.24, "end": 0.12}, "fear": {"start": 0.18, "end": 0.08},
-    "contempt": {"start": 0.18, "end": 0.08}, "disgust": {"start": 0.18, "end": 0.08},
+    "neutral": {"start": 0.52, "end": 0.34}, "happiness": {"start": 0.38, "end": 0.22},
+    "surprise": {"start": 0.32, "end": 0.18}, "sadness": {"start": 0.22, "end": 0.11},
+    "anger": {"start": 0.22, "end": 0.11}, "fear": {"start": 0.21, "end": 0.10},
+    "contempt": {"start": 0.24, "end": 0.12}, "disgust": {"start": 0.24, "end": 0.12},
 }
 
 
@@ -350,7 +350,7 @@ class FERStream:
         self.scaler = SensitivityScaler(self.classes, s.get("weights"), s.get("enabled", True))
         self.calibrator = BaselineCalibrator(
             self.classes, b.get("calib_seconds", 3.0), b.get("min_samples", 5), b.get("max_non_neutral", 0.15),
-            b.get("neutral_margin", 0.20), b.get("delta_gain", 2.0), b.get("class_gains"),
+            b.get("neutral_margin", 0.16), b.get("delta_gain", 2.0), b.get("class_gains"),
             b.get("dynamic_neutral_suppress", True), b.get("adaptive_momentum", 0.0), b.get("enabled", True))
         self.segmenter = HysteresisSegmenter(
             self.classes, h.get("theta_start", 0.55), h.get("theta_end", 0.35), h.get("t_min", 0.25),

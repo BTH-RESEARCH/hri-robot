@@ -1,0 +1,193 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1360" width="2000" height="1360" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#2f5fa8"/></marker>
+    <marker id="o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#d9692e"/></marker>
+    <marker id="t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#23898a"/></marker>
+    <style>
+      .grp{fill:none;stroke:#6b8fc9;stroke-width:2.5;stroke-dasharray:10 7}
+      .sub{fill:#f7f9fd;stroke:#9db3d9;stroke-width:2;stroke-dasharray:6 5}
+      .box{fill:#fff;stroke:#2f5fa8;stroke-width:2.5}
+      .pill{fill:#eef3fb;stroke:#2f5fa8;stroke-width:2}
+      .ln{fill:none;stroke:#2f5fa8;stroke-width:3;marker-end:url(#a)}
+      .lo{fill:none;stroke:#d9692e;stroke-width:3;stroke-dasharray:8 6;marker-end:url(#o)}
+      .lt{fill:none;stroke:#23898a;stroke-width:3;stroke-dasharray:8 6;marker-end:url(#t)}
+      .h{font-size:30px;fill:#1d2b45}
+      .b{font-size:22px;font-weight:700;fill:#1d2b45}
+      .s{font-size:19px;fill:#1d2b45}
+      .x{font-size:16px;fill:#4a5a75}
+      .c{text-anchor:middle}
+    </style>
+  </defs>
+  <rect width="2000" height="1360" fill="#fff"/>
+
+  <!-- column titles -->
+  <text class="h c" x="310" y="95">Initialization &amp; Continuous Sensing</text>
+  <text class="h c" x="900" y="95">Facial Cue Processing</text>
+  <text class="h c" x="1590" y="95">Hybrid Dialogue Management</text>
+
+  <!-- ================= A: session start / end ================= -->
+  <rect class="grp" x="40" y="130" width="540" height="460" rx="22"/>
+  <text class="b" x="65" y="165">Session start &amp; end</text>
+  <rect class="box" x="70" y="185" width="220" height="70" rx="12"/>
+  <text class="s c" x="180" y="215">Child face in</text><text class="s c" x="180" y="240">central zone</text>
+  <rect class="box" x="340" y="185" width="210" height="70" rx="12"/>
+  <text class="s c" x="445" y="227">Session opened</text>
+  <path class="ln" d="M290 220H338"/>
+  <rect class="pill" x="340" y="280" width="210" height="70" rx="12"/>
+  <text class="s c" x="445" y="310">Learn neutral baseline</text><text class="x c" x="445" y="334">first 3 s of face time</text>
+  <rect class="pill" x="340" y="375" width="210" height="70" rx="12"/>
+  <text class="s c" x="445" y="405">Arrival greeting</text><text class="x c" x="445" y="429">fixed text, no LLM</text>
+  <path class="ln" d="M445 255V278"/><path class="ln" d="M445 350V373"/>
+  <rect class="box" x="70" y="280" width="220" height="70" rx="12"/>
+  <text class="s c" x="180" y="321">Parent speech</text>
+  <rect class="box" x="70" y="375" width="220" height="70" rx="12"/>
+  <text class="s c" x="180" y="405">On-device ASR</text><text class="x c" x="180" y="429">Silero VAD + Zipformer</text>
+  <path class="ln" d="M180 350V373"/>
+  <text class="x" x="70" y="478">Speech without a face also opens a session (no greeting).</text>
+  <rect class="pill" x="70" y="495" width="480" height="75" rx="12"/>
+  <text class="s c" x="310" y="525">Session end: 45 s without face and speech</text>
+  <text class="x c" x="310" y="550">memory, frame queue and baseline wiped · robot sleeps</text>
+
+  <!-- sensing -->
+  <rect class="box" x="40" y="615" width="540" height="70" rx="14" fill="#eef3fb"/>
+  <text class="b c" x="310" y="645">Sensing</text><text class="x c" x="310" y="670">Camera Module 3 (child only) · USB microphone (parent)</text>
+  <path d="M310 615V592" fill="none" stroke="#2f5fa8" stroke-width="2.5" stroke-dasharray="5 5"/>
+
+  <!-- ================= A: micro-loop ================= -->
+  <rect class="grp" x="40" y="710" width="540" height="480" rx="22"/>
+  <text class="b" x="65" y="748" fill="#d9692e" style="fill:#d9692e">Micro-loop · local facial feedback</text>
+  <text class="x" x="65" y="775">every 1 s, only while the robot is not speaking · no LLM</text>
+  <text class="x" x="180" y="805" text-anchor="middle">child group</text><text class="x" x="445" y="805" text-anchor="middle">robot face</text>
+  <g>
+    <rect class="pill" x="70" y="818" width="220" height="50" rx="10"/><text class="s c" x="180" y="850">Focus</text>
+    <rect class="box" x="340" y="818" width="210" height="50" rx="10"/><text class="s c" x="445" y="850">listening</text>
+    <path class="ln" d="M290 843H338"/>
+    <rect class="pill" x="70" y="880" width="220" height="50" rx="10"/><text class="s c" x="180" y="912">Enjoy / curious</text>
+    <rect class="box" x="340" y="880" width="210" height="50" rx="10"/><text class="s c" x="445" y="904">happy</text><text class="x c" x="445" y="923">surprise: curious</text>
+    <path class="ln" d="M290 905H338"/>
+    <rect class="pill" x="70" y="942" width="220" height="50" rx="10"/><text class="s c" x="180" y="974">Confused / sad</text>
+    <rect class="box" x="340" y="942" width="210" height="50" rx="10"/><text class="s c" x="445" y="966">empathy</text><text class="x c" x="445" y="985">fear: concerned</text>
+    <path class="ln" d="M290 967H338"/>
+    <rect class="pill" x="70" y="1004" width="220" height="50" rx="10"/><text class="s c" x="180" y="1036">Dislike</text>
+    <rect class="box" x="340" y="1004" width="210" height="50" rx="10"/><text class="s c" x="445" y="1036">calm</text>
+    <path class="ln" d="M290 1029H338"/>
+    <rect class="pill" x="70" y="1066" width="220" height="50" rx="10"/><text class="s c" x="180" y="1098">Face away</text>
+    <rect class="box" x="340" y="1066" width="210" height="50" rx="10"/><text class="s c" x="445" y="1098">curious (search)</text>
+    <path class="ln" d="M290 1091H338"/>
+  </g>
+  <text class="x" x="70" y="1155">Input: 1-s window of the frame-state queue (3 s if no group dominates)</text>
+
+  <!-- ================= B: facial cue processing ================= -->
+  <rect class="grp" x="620" y="130" width="560" height="1060" rx="22"/>
+  <rect class="sub" x="645" y="155" width="510" height="335" rx="16"/>
+  <text class="b" x="665" y="188">Vision process · separate CPU process</text>
+  <rect class="box" x="670" y="205" width="460" height="50" rx="10"/><text class="s c" x="900" y="237">YuNet face detection</text>
+  <rect class="box" x="670" y="275" width="460" height="50" rx="10"/><text class="s c" x="900" y="307">Central-face tracking (child zone)</text>
+  <rect class="box" x="670" y="345" width="460" height="60" rx="10"/><text class="s c" x="900" y="372">ResNet-18 FERPlus · ONNX FP32</text><text class="x c" x="900" y="395">8 expression scores · 10 FPS</text>
+  <rect class="pill" x="670" y="425" width="460" height="45" rx="10"/><text class="s c" x="900" y="454">FER results queue → main process</text>
+  <path class="ln" d="M900 255V273"/><path class="ln" d="M900 325V343"/><path class="ln" d="M900 405V423"/>
+
+  <rect class="box" x="645" y="515" width="480" height="175" rx="16"/>
+  <text class="b" x="665" y="550">Post-processing V3b</text>
+  <rect class="pill" x="665" y="580" width="140" height="80" rx="10"/><text class="s c" x="735" y="615">Class</text><text class="s c" x="735" y="640">weights</text>
+  <rect class="pill" x="825" y="580" width="140" height="80" rx="10"/><text class="s c" x="895" y="615">Neutral</text><text class="s c" x="895" y="640">baseline</text>
+  <rect class="pill" x="985" y="580" width="125" height="80" rx="10"/><text class="s c" x="1047" y="615">Temporal</text><text class="s c" x="1047" y="640">rules</text>
+  <path class="ln" d="M805 620H823"/><path class="ln" d="M965 620H983"/>
+  <path class="ln" d="M900 470V513"/><path class="ln" d="M885 690V718"/>
+
+  <!-- raw-score guard -->
+  <path class="ln" d="M1130 375H1150V718" stroke-dasharray="7 5"/>
+
+  <rect x="645" y="720" width="510" height="330" rx="22" fill="#f6b8a0" stroke="#d9692e" stroke-width="3"/>
+  <text class="b c" x="900" y="757">Frame-state queue · last 60 s</text>
+  <text class="x" x="1135" y="785" text-anchor="end">raw anger+disgust+contempt ≥ 0.15 to count as Dislike ◂</text>
+  <g fill="#2f6e8f">
+    <rect x="690" y="800" width="24" height="22" rx="4"/><rect x="720" y="800" width="24" height="22" rx="4"/><rect x="750" y="800" width="24" height="22" rx="4"/><rect x="780" y="800" width="24" height="22" rx="4"/><rect x="810" y="800" width="24" height="22" rx="4"/><rect x="840" y="800" width="24" height="22" rx="4"/><rect x="870" y="800" width="24" height="22" rx="4"/>
+    <rect x="900" y="800" width="24" height="22" rx="4" opacity=".8"/><rect x="930" y="800" width="24" height="22" rx="4" opacity=".7"/><rect x="960" y="800" width="24" height="22" rx="4" opacity=".6"/><rect x="990" y="800" width="24" height="22" rx="4" opacity=".5"/><rect x="1020" y="800" width="24" height="22" rx="4" opacity=".4"/><rect x="1050" y="800" width="24" height="22" rx="4" opacity=".3"/><rect x="1080" y="800" width="24" height="22" rx="4" opacity=".2"/>
+  </g>
+  <text class="x c" x="900" y="845">one entry per frame (absent face included)</text>
+  <rect class="pill" x="665" y="858" width="108" height="42" rx="10"/><text class="s c" x="719" y="886">Focus</text>
+  <rect class="pill" x="785" y="858" width="108" height="42" rx="10"/><text class="s c" x="839" y="886">Enjoy</text>
+  <rect class="pill" x="905" y="858" width="108" height="42" rx="10"/><text class="s c" x="959" y="886">Confused</text>
+  <rect class="pill" x="1025" y="858" width="108" height="42" rx="10"/><text class="s c" x="1079" y="886">Dislike</text>
+  <line x1="680" y1="920" x2="1120" y2="920" stroke="#d9692e" stroke-width="1.5"/>
+  <text class="b c" x="900" y="958">Child-state summary</text>
+  <text class="x c" x="900" y="990">windows: 1 s micro-loop · 3 s LLM and speech pace</text>
+  <text class="x c" x="900" y="1014">4 s distress · robot turn + 0.7 s topic feedback</text>
+  <path class="ln" d="M645 980H582"/>
+
+  <!-- ================= C: dialogue ================= -->
+  <rect class="grp" x="1220" y="130" width="740" height="1060" rx="22"/>
+  <!-- local checks -->
+  <rect class="box" x="1245" y="170" width="330" height="150" rx="14"/>
+  <text class="b" x="1265" y="203">Local checks (on the Pi)</text>
+  <text class="s" x="1265" y="238">Safety keywords → support</text><text class="x" x="1265" y="260">message, LLM skipped</text>
+  <text class="s" x="1265" y="292">Vague command → topic hint</text>
+  <!-- LLM inputs -->
+  <rect class="box" x="1600" y="170" width="335" height="220" rx="14"/>
+  <text class="b c" x="1767" y="203">LLM inputs</text>
+  <text class="x c" x="1767" y="235">System prompt + parent turn</text>
+  <text class="x c" x="1767" y="263">Child-state summary (last 3 s)</text>
+  <text class="x c" x="1767" y="291">History + session summary</text>
+  <text class="x c" x="1767" y="319">Topic reactions (likes / dislikes)</text>
+  <text class="x c" x="1767" y="347">Robot face + guidance / hint</text>
+  <path class="ln" d="M1575 245H1598"/>
+  <!-- cloud LLM -->
+  <rect x="1415" y="420" width="300" height="80" rx="14" fill="#f3eefc" stroke="#7b4fc4" stroke-width="2.5"/>
+  <text class="b c" x="1565" y="452">Cloud LLM</text><text class="x c" x="1565" y="478">streaming · dropped stream → continue</text>
+  <path class="ln" d="M1767 390V460H1717"/>
+  <rect class="box" x="1415" y="530" width="300" height="55" rx="12"/><text class="s c" x="1565" y="564">Parse [TOPIC] / [EMO] tags</text>
+  <path class="ln" d="M1565 500V528"/>
+  <rect class="box" x="1600" y="605" width="335" height="55" rx="12"/><text class="s c" x="1767" y="639">Expression control → face</text>
+  <path class="ln" d="M1680 585V603"/>
+  <rect x="1600" y="680" width="335" height="85" rx="12" fill="#fdf3d8" stroke="#2f5fa8" stroke-width="2.5"/>
+  <text class="s c" x="1767" y="712">Text → lexicon → Piper TTS</text><text class="x c" x="1767" y="740">speech pace follows the child</text>
+  <path class="ln" d="M1440 585V700H1598"/>
+
+  <!-- child-state bus -->
+  <path d="M1155 960H1200V360" fill="none" stroke="#2f5fa8" stroke-width="3"/>
+  <path class="ln" d="M1200 360H1598"/>
+  <path class="ln" d="M1200 750H1598"/><text class="x" x="1300" y="742">speech pace</text>
+  <path class="ln" d="M1200 960V985H1243"/>
+  <path class="ln" d="M1200 815H1243"/>
+
+  <!-- intervention -->
+  <rect class="box" x="1245" y="790" width="330" height="120" rx="14"/>
+  <text class="b" x="1265" y="823">Intervention logic</text>
+  <text class="x" x="1265" y="850">upset (confused / dislike) ≥ 80% of 4 s</text>
+  <text class="x" x="1265" y="873">cooldown 60 s</text>
+  <text class="x" x="1265" y="896">→ guidance for the next LLM turn</text>
+  <path class="lo" d="M1520 790V778H1650V769"/>
+  <text x="1465" y="785" font-size="17" font-weight="700" fill="#d9692e">Stop</text>
+  <rect x="1600" y="790" width="335" height="120" rx="14" fill="#f6b8a0" stroke="#d9692e" stroke-width="2.5"/>
+  <text class="b c" x="1767" y="828">Local support</text>
+  <text class="x c" x="1767" y="856">cancel LLM reply · calm face</text>
+  <text class="x c" x="1767" y="880">soothe the child · tell the parent</text>
+  <path class="ln" d="M1575 870H1598"/>
+
+  <!-- topic feedback -->
+  <rect x="1245" y="945" width="690" height="85" rx="14" fill="#eef8f7" stroke="#23898a" stroke-width="2.5"/>
+  <text class="b" x="1265" y="980">Topic feedback</text>
+  <text class="x" x="1265" y="1010">child reaction while the robot speaks a topic (+0.7 s) → likes / dislikes</text>
+  <path class="lt" d="M1935 987H1950V280H1937"/>
+  <text x="1945" y="1060" font-size="18" fill="#23898a" text-anchor="end">next turn ↑</text>
+
+  <!-- session memory -->
+  <rect class="sub" x="1245" y="1080" width="690" height="85" rx="14"/>
+  <text class="s" x="1265" y="1113">Session memory (RAM only)</text>
+  <text class="x" x="1265" y="1143">last 6 turns verbatim + rolling summary written by the cloud LLM in the background</text>
+
+  <!-- ================= outputs ================= -->
+  <path d="M1935 632H1978M1935 722H1978M1935 850H1978" fill="none" stroke="#2f5fa8" stroke-width="3"/>
+  <path class="ln" d="M1978 632V1262H1212"/>
+  <path class="ln" d="M580 1175H600V1262H788"/>
+  <rect x="790" y="1225" width="420" height="75" rx="16" fill="#eef3fb" stroke="#2f5fa8" stroke-width="3"/>
+  <text class="b c" x="1000" y="1257">Robot output</text><text class="x c" x="1000" y="1283">animated eyes (7" LCD) + speech (HDMI speaker)</text>
+  <path class="ln" d="M790 1290H22V650H38"/>
+  <path class="ln" d="M580 650H600V230H668"/>
+  <text x="30" y="1330" font-size="22" font-weight="700" fill="#d9692e">Interaction feedback · the camera observes the child's next reaction</text>
+
+  <!-- ASR -> parent turn -->
+  <path class="ln" d="M70 410H52V115H1410V168"/>
+  <text class="x" x="1060" y="108">parent turn (ASR text)</text>
+</svg>

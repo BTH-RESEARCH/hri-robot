@@ -260,6 +260,7 @@ Các nhóm tham số chính:
 | `child.*` | hàng đợi trạng thái, ngưỡng vắng mặt, `distress.*` (khó chịu kéo dài) |
 | `audio.*` | thiết bị vào/ra, VAD, ASR, TTS (`speed`, `speaker_id` = giọng đọc của robot) |
 | `audio.vad.pre_roll_sec`, `audio.tts.tail_sec` | đệm trước tiếng nói (chống mất từ đầu), im lặng trước khi đóng loa (chống mất chữ cuối) |
+| `audio.tts.lexicon` | cách đọc tiếng Việt cho từ tiếng Anh (giọng Piper chỉ đọc được tiếng Việt) |
 | `llm.*` | danh sách provider, `temperature`, `max_tokens`, `sentences_child` / `sentences_parent` |
 | `memory.*` | thời gian chờ kết thúc phiên, số lượt giữ nguyên văn, nhịp và độ dài tóm tắt |
 | `expression.allowed` | các nhãn `[EMO]` LLM được dùng |
@@ -278,20 +279,20 @@ hri test --set camera.backend=file --set camera.source=samples/video.mp4
 ### Chọn khuôn mặt của bé
 Chỉ theo dõi mặt có tâm nằm trong vùng giữa (50% bề ngang), bám cùng một mặt; mặt khác phải ở lại 2 s mới được theo dõi và nhận số mới cùng baseline riêng. **Vùng giữa không chứng minh đó là trẻ.**
 
-### Hậu kỳ FER (kế thừa `fer_resnet_demo` v2, biến thể V3b)
+### Hậu kỳ FER (kế thừa `fer_resnet_demo`, nhánh `feat/resnet-postprocessing`)
 ```
 camera → YuNet → crop vuông (margin 0.15) → ResNet-18 → softmax
-  1. Sensitivity scaling   P'_c = w_c·P_c / Σ w_j·P_j        (neutral ×0.45 … disgust ×3.6)
+  1. Sensitivity scaling   P'_c = w_c·P_c / Σ w_j·P_j        (neutral ×0.52 … disgust ×2.75)
   2. Baseline cá nhân      P_base đo 3 s mặt tĩnh, kẹp lớp phi-neutral ≤ 0.15 (phần dư dồn về neutral);
-                           lớp vượt baseline: p + gain_c·Δ (happiness 1.6 … disgust 3.6), còn lại p·0.5;
-                           neutral: p − 0.20 − 2.2·max(Δ phi-neutral) khi có cảm xúc chớm xuất hiện
+                           lớp vượt baseline: p + gain_c·Δ (happiness 1.6 … sadness/anger 3.3), còn lại p·0.5;
+                           neutral: p − 0.16 − 2.2·max(Δ phi-neutral) khi có cảm xúc chớm xuất hiện
   3. Hysteresis + 2 luật sinh lý → NHÃN ỔN ĐỊNH
-       ngưỡng bắt đầu/duy trì theo lớp (neutral 0.55/0.38 … fear 0.18/0.08), giữ t_min 0.25 s,
+       ngưỡng bắt đầu/duy trì theo lớp (neutral 0.52/0.34 … sadness 0.22/0.11), giữ t_min 0.25 s,
        luật 1: thời gian lưu 0.25 s; muốn đổi tiêu cực ↔ tích cực phải qua neutral ≥ 0.25 s,
        luật 2: ma trận rào cản chuyển tiếp (vd sadness → happiness +0.35), ân hạn suy tàn 0.2 s
 ```
 - Code nằm ở `src/hri/vision/postproc.py`, port từ `fer_demo/loss.py`, `calibration.py`, `temporal.py` theo **đúng chuỗi của `runners.py` + `configs/default.yaml`** (sensitivity *trước* baseline, `class_gains` lấy từ config). Ở những chỗ README / `EmotionPostProcessor` của demo nói khác, code `runners.py` được ưu tiên.
-- Đã kiểm tra trùng khớp với code demo: 13.500 frame ngẫu nhiên, lệch xác suất ≤ 1e-7, **0 frame lệch nhãn**.
+- Đã kiểm tra trùng khớp với code demo (nhánh `feat/resnet-postprocessing`): 40.500 frame ngẫu nhiên, lệch xác suất ≤ 1,2e-7, **0 frame lệch nhãn**.
 - EMA không còn nằm trong chuỗi, giống demo (`vision.smoothing.enabled: false`). Mỗi khâu đều tắt được (`enabled: false`, `transition_dynamics: false` = V3a) để làm ablation.
 - Không kế thừa: pedagogy. Detector: YuNet thay cho YOLO.
 - Đo giả lập từng khâu so với EMA: `python scripts/eval_postproc.py`.
@@ -305,7 +306,7 @@ camera → YuNet → crop vuông (margin 0.15) → ResNet-18 → softmax
 | `confused_sad` | sadness, fear | empathy / concerned | ×0.85 | chậm lại, trấn an, nói đơn giản hơn |
 | `dislike_distracted` | anger, disgust, contempt, **mất mặt** | calm (mất mặt: curious) | ×0.95 | rút ngắn, đổi chủ đề, cho nghỉ |
 
-Ba nhãn anger, disgust, contempt chỉ tính vào `dislike_distracted` khi **model thô** cho tổng ít nhất `child.dislike_min_raw` (0.15); nếu không thì là `neutral_focus`. Hậu xử lý khuếch đại mạnh ba lớp này, nên thiếu điều kiện trên thì 2% disgust thô đã đủ bật nhóm. Điều kiện chỉ ở tầng nhóm: nhãn và xác suất không đổi.
+Ba nhãn anger, disgust, contempt chỉ tính vào `dislike_distracted` khi **model thô** cho tổng ít nhất `child.dislike_min_raw` (0.25) **và** kéo dài ít nhất `child.dislike_hold_sec` (1 s); nếu không thì là `neutral_focus`. Khi đủ 1 s, cả đoạn từ lúc bắt đầu được tính là dislike. Hậu xử lý khuếch đại mạnh ba lớp này, nên thiếu điều kiện trên thì 2% disgust thô đã đủ bật nhóm. Điều kiện chỉ ở tầng nhóm: nhãn và xác suất không đổi.
 
 FERPlus không có lớp "bối rối" hay "xao nhãng": hai khái niệm này chỉ được suy ra.
 

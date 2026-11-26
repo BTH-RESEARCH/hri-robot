@@ -45,23 +45,23 @@ vision:
     # Preprocessing (classes, img_size, grayscale, train_res, mean/std) is read from the pack's fer.json,
     # so it always matches training. FERPlus: gray -> 48x48 (BOX) -> RGB -> 224 (BILINEAR) -> ImageNet norm.
     num_threads: 2
-  # ---- Post-processing inherited from fer_resnet_demo v2 (= ablation V3b, runners.py webcam chain):
+  # ---- Post-processing inherited from fer_resnet_demo feat/resnet-postprocessing (runners.py webcam chain):
   #      softmax -> sensitivity -> personal baseline -> hysteresis + 2 biomechanical rules
   #      Each stage can be switched off for ablation (enabled: false).
   sensitivity:             # 1. cost-sensitive scaling  P'_c = w_c P_c / sum(w_j P_j)   (fer_demo/loss.py)
     enabled: true
-    weights: {neutral: 0.45, happiness: 0.95, surprise: 1.15, sadness: 1.85, anger: 1.90,
-              fear: 3.00, contempt: 3.40, disgust: 3.60}
+    weights: {neutral: 0.52, happiness: 0.95, surprise: 1.15, sadness: 2.05, anger: 2.05,
+              fear: 2.65, contempt: 2.65, disgust: 2.75}
   baseline:                # 2. personal resting-face baseline + Dynamic Gain Control (fer_demo/calibration.py)
     enabled: true
     calib_seconds: 3.0     # user looks at the robot with a resting face
     min_samples: 5
     max_non_neutral: 0.15  # sanity clamp: non-neutral share of P_base capped, surplus -> neutral
-    neutral_margin: 0.20
+    neutral_margin: 0.16
     dynamic_neutral_suppress: true   # extra neutral penalty = 2.2 x largest positive non-neutral delta
     delta_gain: 2.0        # gain for classes missing from class_gains
-    class_gains: {neutral: 1.0, happiness: 1.6, surprise: 2.0, sadness: 3.2, anger: 3.2,
-                  fear: 3.4, contempt: 3.4, disgust: 3.6}
+    class_gains: {neutral: 1.0, happiness: 1.6, surprise: 2.0, sadness: 3.3, anger: 3.3,
+                  fear: 3.0, contempt: 2.9, disgust: 3.0}
     adaptive_momentum: 0.0 # >0: slowly update P_base while the user is neutral
   hysteresis:              # 3. stable label: dual thresholds + biomechanical rules (fer_demo/temporal.py)
     enabled: true
@@ -75,14 +75,14 @@ vision:
     theta_start: 0.55      # defaults for classes missing from class_thresholds
     theta_end: 0.35
     class_thresholds:
-      neutral: {start: 0.55, end: 0.38}
+      neutral: {start: 0.52, end: 0.34}
       happiness: {start: 0.38, end: 0.22}
       surprise: {start: 0.32, end: 0.18}
-      sadness: {start: 0.24, end: 0.12}
-      anger: {start: 0.24, end: 0.12}
-      fear: {start: 0.18, end: 0.08}
-      contempt: {start: 0.18, end: 0.08}
-      disgust: {start: 0.18, end: 0.08}
+      sadness: {start: 0.22, end: 0.11}
+      anger: {start: 0.22, end: 0.11}
+      fear: {start: 0.21, end: 0.10}
+      contempt: {start: 0.24, end: 0.12}
+      disgust: {start: 0.24, end: 0.12}
   smoothing:               # EMA is no longer in the demo's chain (comparator only) -> off by default
     enabled: false
     alpha: 0.45
@@ -93,7 +93,8 @@ child:                       # frame queue of the child's state (4 groups)
   min_frames: 3
   away_ratio: 0.6            # face missing in this share of the window -> "away"
   away_min_sec: 1.5
-  dislike_min_raw: 0.15      # anger+disgust+contempt of the RAW model needed to count as dislike (0 = off)
+  dislike_min_raw: 0.25      # anger+disgust+contempt of the RAW model needed to count as dislike (0 = off)
+  dislike_hold_sec: 1.0      # ... and it must last this long (0 = off); brief frowns stay focus
   observe_lag_sec: 0.7       # reactions a moment after the robot stopped still belong to what it said
   distress:                  # visible, calibrated face upset for this long -> local soothing + tell the parent
     enabled: true
@@ -125,6 +126,32 @@ audio:
     speed: 1.0
     speaker_id: 0
     tail_sec: 0.5          # silence before the loudspeaker closes; raise it if Bluetooth / HDMI still cuts
+    # The Vietnamese voice cannot say English words: they are replaced by a Vietnamese spelling before speaking
+    # (whole word, any case). Words still missing are logged: "TTS: no Vietnamese spelling for ...".
+    lexicon:
+      Grace: Gờ rây
+      OK: ô kê
+      okay: ô kê
+      robot: rô bốt
+      hello: hê lô
+      hi: hai
+      bye: bai
+      video: vi đê ô
+      TV: ti vi
+      camera: ca mê ra
+      piano: pi a nô
+      karaoke: ca ra ô kê
+      game: ghêm
+      pizza: pi da
+      sorry: xo ri
+      baby: bê bi
+      wow: quao
+      internet: in tơ nét
+      online: on lai
+      wifi: oai phai
+      email: i meo
+      iPad: ai pát
+      YouTube: du túp
 
 llm:
   # tried in order; falls back to the next on error before the first token

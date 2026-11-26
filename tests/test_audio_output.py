@@ -233,3 +233,29 @@ def test_microphone_is_closed_for_the_whole_turn():
     assert not a._asr_muted()
     a.speaker.playing.set()                                # device still playing its tail
     assert a._asr_muted()
+
+
+def test_lexicon_replaces_english_words_for_the_vietnamese_voice():
+    from hri.audio.tts import Lexicon
+    from hri.config import load_config
+    lx = Lexicon(load_config("pi5").get("audio.tts.lexicon"))
+    assert lx.apply("Grace ơi, OK! Mình là robot, xem TV nhé.") == "Gờ rây ơi, ô kê! Mình là rô bốt, xem ti vi nhé."
+    assert lx.apply("Okay okay") == "ô kê ô kê"
+    assert lx.apply("chim hiền, chiếc khiên") == "chim hiền, chiếc khiên"       # 'hi' only as a whole word
+    assert Lexicon({}).apply("Grace") == "Grace"
+
+
+def test_every_lexicon_entry_and_the_prompt_rule_give_vietnamese_sounds():
+    from piper_phonemize import phonemize_espeak
+
+    from hri.audio.tts import ENGLISH_PHONES, Lexicon
+    from hri.config import load_config
+    from hri.llm.prompts import build_system_prompt
+    for word, spoken in load_config("pi5").get("audio.tts.lexicon").items():
+        assert not ENGLISH_PHONES.search("".join(phonemize_espeak(spoken, "vi")[0])), word
+    assert ENGLISH_PHONES.search("".join(phonemize_espeak("Grace", "vi")[0]))
+    assert "không dùng từ tiếng Anh" in build_system_prompt(["happy"])
+    lx = Lexicon({})
+    assert lx.check("Hello mèo con", phonemize_espeak, "vi") == ["Hello"]
+    assert lx.check("Hello", phonemize_espeak, "vi") == []                      # logged once
+

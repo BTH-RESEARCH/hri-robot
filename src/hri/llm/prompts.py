@@ -46,6 +46,7 @@ Thống nhất cách xưng hô thân thiện: luôn xưng "mình" và gọi ngư
 # Nhịp độ & Quy tắc văn bản đọc loa
 - Mỗi câu cần tròn ý, có dấu phẩy ngắt nhịp hợp lý để bộ tổng hợp giọng nói đọc truyền cảm, không ngắt vụn.
 - Chỉ dùng văn bản thuần túy để đọc thành tiếng: tuyệt đối không dùng markdown, emoji, ký hiệu lạ hay từ viết tắt.
+- Giọng đọc chỉ đọc được tiếng Việt: không dùng từ tiếng Anh; nếu bắt buộc phải nhắc thì viết theo cách đọc tiếng Việt (ví dụ: ô kê, rô bốt, ti vi).
 
 # Thích ứng theo tín hiệu cảm xúc của TRẺ
 Tín hiệu camera chỉ mang tính tham khảo gián tiếp:
@@ -137,9 +138,8 @@ def guidance_after_intervention(reply: str) -> str:
 
 
 # ---- a vague command and no topic yet: tell the LLM not to invent a script (no extra rule in the system prompt)
-VAGUE_CORE = set("kể nói chào hát đố chơi chuyện truyện trò".split())
-VAGUE_FILLER = set("""đi nhé nha nhá nào với cho nghe gì grace ơi à ạ bé con em cháu trẻ nhỏ ba bố mẹ mình bạn hãy giúp thử
-    một câu bài cái vui cùng xin tiếp nữa thêm hay khác lại""".split())
+VAGUE_CORE = {"kể", "nói", "chào", "hát", "đố", "chơi", "chuyện", "truyện", "trò"}
+VAGUE_FILLER = {"đi", "nhé", "nha", "nhá", "nào", "với", "cho", "nghe", "gì", "grace", "ơi", "à", "ạ", "bé", "con", "em", "cháu", "trẻ", "nhỏ", "ba", "bố", "mẹ", "mình", "bạn", "hãy", "giúp", "thử", "một", "câu", "bài", "cái", "vui", "cùng", "xin", "tiếp", "nữa", "thêm", "hay", "khác", "lại"}
 NO_TOPIC = {"", "khác", "chào hỏi", "phụ huynh"}
 HINT_GREET = ("Phụ huynh chưa nêu chủ đề cụ thể. Lượt này nói 2 đến 3 câu trọn ý: chào bạn nhỏ, không tả ngoại hình bạn nhỏ; "
               "rồi hỏi phụ huynh (gọi là bạn) có muốn nghe một chủ đề gần gũi không, chỉ nêu 1 chủ đề, không dùng chữ hay "

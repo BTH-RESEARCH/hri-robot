@@ -37,6 +37,14 @@ def child_group(frame, labels: list[str], dislike_min_raw: float) -> str:
     return g
 
 
+def _as_focus(e) -> None:
+    """A dislike frame that does not count: focus, and its boosted dislike mass must not drive trends either."""
+    k = GROUPS.index(DISLIKE)
+    e.gp = e.gp.copy()
+    e.gp[GROUPS.index(FOCUS)] += e.gp[k]
+    e.gp[k], e.group, e.label = 0.0, FOCUS, "neutral"
+
+
 @dataclass
 class Entry:
     t: float
@@ -55,13 +63,17 @@ class ChildQueue:
         self.min_frames = int(cfg.get("min_frames", 3))
         self.away_ratio = float(cfg.get("away_ratio", 0.6))
         self.away_min_sec = float(cfg.get("away_min_sec", 1.5))
-        self.dislike_min_raw = float(cfg.get("dislike_min_raw", 0.15))
+        self.dislike_min_raw = float(cfg.get("dislike_min_raw", 0.25))
+        self.dislike_hold = float(cfg.get("dislike_hold_sec", 1.0))
         self._q: deque[Entry] = deque()
         self._lock = threading.Lock()
+        self._run_t0: float | None = None                       # start of the current run of dislike frames
+        self._pending: list[tuple[Entry, np.ndarray, str]] = []  # its frames, shown as focus until confirmed
 
     def reset(self) -> None:
         with self._lock:
             self._q.clear()
+            self._run_t0, self._pending = None, []
 
     def _push(self, e: Entry) -> None:
         with self._lock:
@@ -70,15 +82,28 @@ class ChildQueue:
                 self._q.popleft()
 
     def add(self, frame) -> str:
-        """frame: postproc.AffectFrame -> its group"""
+        """frame: postproc.AffectFrame -> its group.
+        Dislike must also LAST: a run of dislike frames counts as focus until it is `dislike_hold_sec` long; then the
+        whole run (still in the queue) becomes dislike, so later windows see when it really started. Brief frowns
+        never reach the robot. A missing face does not break a run."""
         g = child_group(frame, self.labels, self.dislike_min_raw)
-        gp, label = group_probs(frame.probs, self.labels), frame.label
-        if g != EMOTION_TO_GROUP[label]:          # rejected dislike: its boosted mass must not drive trends either
-            k = GROUPS.index(DISLIKE)
-            gp[GROUPS.index(FOCUS)] += gp[k]
-            gp[k], label = 0.0, "neutral"
-        self._push(Entry(frame.t, g, label, gp, frame.quality, frame.calibrated))
-        return g
+        e = Entry(frame.t, g, frame.label, group_probs(frame.probs, self.labels), frame.quality, frame.calibrated)
+        if g == DISLIKE:
+            self._run_t0 = frame.t if self._run_t0 is None else self._run_t0
+            if frame.t - self._run_t0 < self.dislike_hold - 1e-9:
+                self._pending.append((e, e.gp, e.label))
+                _as_focus(e)
+            else:
+                with self._lock:
+                    for old, gp, label in self._pending:
+                        old.group, old.gp, old.label = DISLIKE, gp, label
+                self._pending = []
+        else:
+            if g != EMOTION_TO_GROUP[frame.label]:              # rejected by the raw guard
+                _as_focus(e)
+            self._run_t0, self._pending = None, []
+        self._push(e)
+        return e.group
 
     def add_absent(self, t: float) -> None:
         self._push(Entry(t, None))

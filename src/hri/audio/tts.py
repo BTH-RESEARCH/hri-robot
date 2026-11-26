@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -17,6 +18,33 @@ log = logging.getLogger(__name__)
 # Piper stops ~35 ms after the last vowel, so its end is easily lost; a pause phoneme after the final mark lets the
 # voice die out (measured: energy of the last 30 ms 0.050 -> 0.005, tail 37 -> 141 ms). At text level it does not work.
 END_PAUSE = " , "
+# espeak's Vietnamese voice gives English words English phonemes, which this Vietnamese-only voice never learnt
+ENGLISH_PHONES = re.compile(r"[ɹæʌɑθð]|eɪ|əʊ|oʊ")  # not ɪ: Vietnamese "ây" is əɪ
+
+
+class Lexicon:
+    """Replaces words the voice cannot say (English, brand names) by a Vietnamese spelling before phonemization.
+    Whole words, case-insensitive, longest entry first. Unknown English words are logged once, to extend the list."""
+
+    def __init__(self, entries: dict | None):
+        self.entries = {str(k).lower(): str(v) for k, v in (entries or {}).items()}
+        keys = sorted(self.entries, key=len, reverse=True)
+        self._re = re.compile(r"(?<!\w)(" + "|".join(map(re.escape, keys)) + r")(?!\w)", re.IGNORECASE) if keys else None
+        self._warned: set[str] = set()
+
+    def apply(self, text: str) -> str:
+        return self._re.sub(lambda m: self.entries[m.group(1).lower()], text) if self._re else text
+
+    def check(self, text: str, phonemize, lang: str) -> list[str]:
+        """Words still read with English sounds (logged once each)."""
+        new = []
+        for w in {w for w in re.findall(r"\w+", text) if w.isascii() and w.isalpha()} - self._warned:
+            self._warned.add(w)
+            if ENGLISH_PHONES.search("".join(phonemize(w, lang)[0])):
+                new.append(w)
+        if new:
+            log.info("TTS: no Vietnamese spelling for %s -> add it to audio.tts.lexicon", ", ".join(sorted(new)))
+        return new
 
 
 class PiperTTS:
@@ -39,8 +67,11 @@ class PiperTTS:
         self.tts = sherpa_onnx.OfflineTts(conf)
         self.lang = tts_cfg.get("espeak_voice") or self.tts.lang or "vi"
         self.sample_rate = self.tts.sample_rate
+        self.lexicon = Lexicon(tts_cfg.get("lexicon"))
 
     def generate(self, text: str, sid: int = 0, speed: float = 1.0) -> tuple[np.ndarray, int]:
+        text = self.lexicon.apply(text)
+        self.lexicon.check(text, self._phonemize, self.lang)
         sentences = self._phonemize(text, self.lang)
         g = self._sherpa.GenerationConfig()
         g.sid = sid

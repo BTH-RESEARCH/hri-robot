@@ -149,8 +149,8 @@ def test_content_log_likes_and_dislikes():
     ("sadness", CONFUSED, "empathy"), ("fear", CONFUSED, "concerned"), ("anger", DISLIKE, "calm"),
 ])
 def test_micro_loop(label, group, expr):
-    q, t = queue((label, 1))
-    d = decide(q.summary(0, t), CFG.section("micro_loop"))
+    q, t = queue((label, 2))                            # dislike must last 1 s, so look at a 2-s stretch
+    d = decide(q.summary(t - 1, t), CFG.section("micro_loop"))
     assert (d.group, d.expression) == (group, expr) and 0.3 <= d.intensity <= 0.8
 
 
@@ -158,7 +158,7 @@ def test_micro_loop_away_and_unclear():
     m = CFG.section("micro_loop")
     q, t = queue((None, 3))
     assert decide(q.summary(0, t), m).expression == "curious"
-    q, t = queue(("neutral", 1), ("anger", 1), ("happiness", 1))
+    q, t = queue(("neutral", 1), ("anger", 1.5), ("happiness", 1))
     assert decide(q.summary(0, t), m) is None
 
 
@@ -193,13 +193,14 @@ def raw(**kw):
 def guarded(label, r, n=24, **cfg):
     q = ChildQueue(L, {**CFG.section("child"), **cfg})
     got = [q.add(frame(i / 8, label, raw=r)) for i in range(n)]
-    return got[0], q.summary(0, 10)
+    return got[-1], q.summary(0, 10)
 
 
 @pytest.mark.parametrize("label, r, expected", [
     ("disgust", raw(disgust=0.08), FOCUS),                     # boosted noise
-    ("disgust", raw(disgust=0.20), DISLIKE),
-    ("disgust", raw(disgust=0.08, anger=0.05, contempt=0.04), DISLIKE),   # together
+    ("disgust", raw(disgust=0.20), FOCUS),
+    ("disgust", raw(disgust=0.30), DISLIKE),
+    ("disgust", raw(disgust=0.12, anger=0.08, contempt=0.06), DISLIKE),   # together
     ("anger", raw(anger=0.5), DISLIKE), ("contempt", raw(contempt=0.02), FOCUS),
     ("sadness", raw(sadness=0.03), CONFUSED),                  # sadness is never touched
     ("happiness", raw(happiness=0.05), ENJOY),
@@ -221,4 +222,19 @@ def test_rejected_dislike_has_no_side_effects():
 
 
 def test_dislike_guard_can_be_switched_off():
-    assert guarded("disgust", raw(disgust=0.02), dislike_min_raw=0)[0] == DISLIKE
+    assert guarded("disgust", raw(disgust=0.02), dislike_min_raw=0, dislike_hold_sec=0)[0] == DISLIKE
+
+
+def test_dislike_must_last():
+    q = ChildQueue(L, CFG.section("child"))
+    seq = [("anger", 0.6)] * 6 + [("neutral", 0.0)] * 4 + [("anger", 0.6)] * 12     # 0.75 s frown, then 1.5 s
+    got = [q.add(frame(i / 8, lab, raw=raw(anger=a))) for i, (lab, a) in enumerate(seq)]
+    assert DISLIKE not in got[:18] and got[18:] == [DISLIKE] * 4                       # confirmed after 1 s
+    groups = [e.group for e in q.window(0, 99)]
+    assert groups[:10] == [FOCUS] * 10 and groups[10:] == [DISLIKE] * 12                # the whole run, not the frown
+    assert q.summary(10 / 8, 21 / 8)["mean_probs"][DISLIKE] > 0.5
+    assert decide(q.summary(20 / 8 - 1, 21 / 8), CFG.section("micro_loop")).expression == "calm"
+    q.add_absent(22 / 8)                                                               # a lost frame does not reset
+    assert q.add(frame(23 / 8, "anger", raw=raw(anger=0.6))) == DISLIKE
+    q.reset()
+    assert q.add(frame(30, "anger", raw=raw(anger=0.6))) == FOCUS
